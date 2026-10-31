@@ -1,0 +1,1268 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
+import type { DemoCategory, DemoData, DemoMenuItem } from "../_lib/demo-data";
+import { loadDemoData, saveDemoData } from "../_lib/demo-storage";
+import { SignOutButton } from "../_lib/admin-provider";
+
+type ItemForm = {
+  name: string;
+  description: string;
+  price: string;
+  categoryId: string;
+  imageUrl: string;
+  isAvailable: boolean;
+};
+
+const navigation = [
+  { label: "Dashboard", href: "/admin/dashboard", icon: "dashboard" },
+  { label: "Menu Categories", href: "/admin/categories", icon: "category" },
+  { label: "Menu Items", href: "/admin/menu-items", icon: "menu", active: true },
+  { label: "Profile", href: "/admin/profile", icon: "profile" },
+] as const;
+
+const inputClass =
+  "h-11 w-full rounded-[10px] border border-[#e5e8e2] bg-white px-3 text-sm text-[#202521] outline-none transition placeholder:text-[#929a93] focus:border-[#185c43] focus:ring-2 focus:ring-[#185c43]/15";
+const emptyForm: ItemForm = {
+  name: "",
+  description: "",
+  price: "",
+  categoryId: "",
+  imageUrl: "",
+  isAvailable: true,
+};
+const emptyCategories: DemoCategory[] = [];
+const emptyItems: DemoMenuItem[] = [];
+const emptyDemoData: DemoData = { categories: [], menuItems: [], tables: [] };
+const formatINR = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 2,
+});
+const DEMO_DATA_KEY = "virtual-rudra.admin.demo-data";
+const standardCategoryOrder = [
+  "starters",
+  "breakfast",
+  "brunch",
+  "lunch",
+  "dinner",
+  "pizza",
+  "pasta",
+  "north indian",
+  "south indian",
+  "chinese",
+  "desserts",
+  "beverages",
+  "snacks",
+];
+const categoryPriority = new Map(
+  standardCategoryOrder.map((name, index) => [name, index]),
+);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDemoMenuItem(value: unknown): value is DemoMenuItem {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.description === "string" &&
+    typeof value.priceINR === "number" &&
+    Number.isFinite(value.priceINR) &&
+    typeof value.imageUrl === "string" &&
+    typeof value.categoryId === "string" &&
+    typeof value.isAvailable === "boolean"
+  );
+}
+
+function isDemoCategory(value: unknown): value is DemoCategory {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    typeof value.description === "string" &&
+    typeof value.imageUrl === "string" &&
+    typeof value.isActive === "boolean" &&
+    typeof value.sortOrder === "number"
+  );
+}
+
+export default function AdminMenuItemsClient() {
+  const [data, setData] = useState<DemoData | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [feedback, setFeedback] = useState("");
+  const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<ItemForm>(emptyForm);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [processingItemId, setProcessingItemId] = useState<string | null>(null);
+
+  async function refreshData() {
+    try {
+      let localData = emptyDemoData;
+      try {
+        localData = loadDemoData();
+      } catch {
+        localData = emptyDemoData;
+      }
+      const [itemsResponse, categoriesResponse] = await Promise.all([
+        fetch("/api/menu-items", { cache: "no-store" }),
+        fetch("/api/categories", { cache: "no-store" }),
+      ]);
+      let itemsPayload: unknown;
+      let categoriesPayload: unknown;
+      try {
+        [itemsPayload, categoriesPayload] = await Promise.all([
+          itemsResponse.json(),
+          categoriesResponse.json(),
+        ]);
+      } catch {
+        itemsPayload = null;
+        categoriesPayload = null;
+      }
+      if (!itemsResponse.ok) {
+        throw new Error(
+          isRecord(itemsPayload) && typeof itemsPayload.error === "string"
+            ? itemsPayload.error
+            : "Could not load products from Supabase.",
+        );
+      }
+      if (
+        !isRecord(itemsPayload) ||
+        !Array.isArray(itemsPayload.items) ||
+        !itemsPayload.items.every(isDemoMenuItem)
+      ) {
+        throw new Error("Supabase returned invalid product data.");
+      }
+      if (!categoriesResponse.ok) {
+        throw new Error(
+          isRecord(categoriesPayload) && typeof categoriesPayload.error === "string"
+            ? categoriesPayload.error
+            : "Could not load categories from Supabase.",
+        );
+      }
+      if (
+        !isRecord(categoriesPayload) ||
+        !Array.isArray(categoriesPayload.categories) ||
+        !categoriesPayload.categories.every(isDemoCategory)
+      ) {
+        throw new Error("Supabase returned invalid category data.");
+      }
+      setData({
+        ...localData,
+        categories: categoriesPayload.categories,
+        menuItems: itemsPayload.items,
+      });
+      setLoadError("");
+    } catch (cause) {
+      setData(null);
+      setLoadError(
+        cause instanceof Error ? cause.message : "Could not load products from Supabase.",
+      );
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    const timer = window.setTimeout(() => {
+      if (active) void refreshData();
+    }, 0);
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === DEMO_DATA_KEY) void refreshData();
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refreshData();
+    };
+    window.addEventListener("storage", handleStorage);
+    const handleFocus = () => void refreshData();
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, []);
+
+  const categories = data?.categories ?? emptyCategories;
+  const items = data?.menuItems ?? emptyItems;
+  const sortedCategories = useMemo(
+    () =>
+      categories.toSorted((left, right) => {
+        const leftPriority =
+          categoryPriority.get(left.name.trim().toLowerCase()) ??
+          Number.MAX_SAFE_INTEGER;
+        const rightPriority =
+          categoryPriority.get(right.name.trim().toLowerCase()) ??
+          Number.MAX_SAFE_INTEGER;
+        return leftPriority - rightPriority || left.sortOrder - right.sortOrder;
+      }),
+    [categories],
+  );
+  const categoryCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      counts.set(item.categoryId, (counts.get(item.categoryId) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return items
+      .filter((item) => categoryFilter === "all" || item.categoryId === categoryFilter)
+      .filter((item) => {
+        const categoryName =
+          categories.find((category) => category.id === item.categoryId)?.name ?? "";
+        return (
+          item.name.toLowerCase().includes(query) ||
+          item.description.toLowerCase().includes(query) ||
+          categoryName.toLowerCase().includes(query)
+        );
+      });
+  }, [categories, categoryFilter, items, search]);
+  const filteredGroups = useMemo(
+    () =>
+      sortedCategories
+        .filter(
+          (category) =>
+            categoryFilter === "all" || category.id === categoryFilter,
+        )
+        .map((category) => ({
+          category,
+          items: filteredItems.filter((item) => item.categoryId === category.id),
+        }))
+        .filter((group) => group.items.length > 0),
+    [categoryFilter, filteredItems, sortedCategories],
+  );
+
+  function resetForm() {
+    setEditingId(null);
+    setForm({
+      ...emptyForm,
+      categoryId: categories.find((category) => category.isActive)?.id ?? "",
+    });
+  }
+
+  function openAddModal() {
+    resetForm();
+    setActionError("");
+    setFeedback("");
+    setIsUploadingImage(false);
+    setIsModalOpen(true);
+  }
+
+  function openEditModal(item: DemoMenuItem) {
+    setEditingId(item.id);
+    setForm({
+      name: item.name,
+      description: item.description,
+      price: String(item.priceINR),
+      categoryId: item.categoryId,
+      imageUrl: item.imageUrl,
+      isAvailable: item.isAvailable,
+    });
+    setActionError("");
+    setFeedback("");
+    setIsUploadingImage(false);
+    setIsModalOpen(true);
+  }
+
+  async function uploadMenuItemImage(file: File) {
+    setActionError("");
+    setFeedback("");
+    if (file.size < 1 || file.size > 5 * 1024 * 1024) {
+      setActionError("Choose an image between 1 byte and 5 MiB.");
+      return;
+    }
+    if (!["image/jpeg", "image/png", "image/webp", "image/avif"].includes(file.type)) {
+      setActionError("Use a JPEG, PNG, WebP, or AVIF image.");
+      return;
+    }
+
+    setIsUploadingImage(true);
+    try {
+      const body = new FormData();
+      body.set("image", file);
+      const response = await fetch("/api/admin/menu-item-image", {
+        method: "POST",
+        body,
+        cache: "no-store",
+      });
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      if (!response.ok) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not upload the menu item image.",
+        );
+      }
+      if (!isRecord(payload) || typeof payload.imageUrl !== "string") {
+        throw new Error("Supabase did not return the uploaded image URL.");
+      }
+      const imageUrl = payload.imageUrl;
+      setForm((current) => ({ ...current, imageUrl }));
+      setFeedback("Image uploaded. Save the menu item to apply it.");
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : "Could not upload the menu item image.",
+      );
+    } finally {
+      setIsUploadingImage(false);
+    }
+  }
+
+  async function saveItem(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setActionError("");
+    setFeedback("");
+    if (!data) {
+      setActionError("Menu data is not available. Reload the page and try again.");
+      return;
+    }
+
+    const name = form.name.trim();
+    const description = form.description.trim();
+    const priceINR = Number(form.price);
+    if (!name) {
+      setActionError("Enter a menu item name.");
+      return;
+    }
+    if (name.length > 100) {
+      setActionError("Menu item names must be 100 characters or fewer.");
+      return;
+    }
+    if (items.some((item) =>
+      item.id !== editingId && item.name.toLowerCase() === name.toLowerCase(),
+    )) {
+      setActionError("A menu item with this name already exists.");
+      return;
+    }
+    if (description.length > 300) {
+      setActionError("Descriptions must be 300 characters or fewer.");
+      return;
+    }
+    if (
+      !/^\d+(\.\d{1,2})?$/.test(form.price.trim()) ||
+      !Number.isFinite(priceINR) ||
+      priceINR < 0
+    ) {
+      setActionError("Enter a valid, non-negative price in INR.");
+      return;
+    }
+    const category = categories.find((entry) => entry.id === form.categoryId);
+    if (!category) {
+      setActionError(
+        categories.length
+          ? "Choose an existing category for this item."
+          : "Create a category before adding menu items.",
+      );
+      return;
+    }
+    const imageUrl = form.imageUrl.trim();
+    if (imageUrl) {
+      try {
+        const image = new URL(imageUrl);
+        if (image.protocol !== "https:" && image.protocol !== "http:") {
+          throw new Error("invalid protocol");
+        }
+      } catch {
+        setActionError("Enter a valid http or https image URL, or leave it blank.");
+        return;
+      }
+    }
+
+    setIsSaving(true);
+    const existing = items.find((item) => item.id === editingId);
+    try {
+      let updatedItem: DemoMenuItem;
+      if (existing) {
+        const response = await fetch("/api/menu-items", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            itemId: existing.id,
+            name,
+            description,
+            priceINR,
+            imageUrl,
+            categoryId: category.id,
+            isAvailable: form.isAvailable,
+            sortOrder: items.indexOf(existing),
+          }),
+          cache: "no-store",
+        });
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+        if (!response.ok) {
+          throw new Error(
+            isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : "Could not update the product in Supabase.",
+          );
+        }
+        if (!isRecord(payload) || !isRecord(payload.item)) {
+          throw new Error("Supabase did not return the updated product.");
+        }
+        const savedItem = payload.item;
+        if (
+          typeof savedItem.id !== "string" ||
+          typeof savedItem.name !== "string" ||
+          typeof savedItem.description !== "string" ||
+          typeof savedItem.priceINR !== "number" ||
+          !Number.isFinite(savedItem.priceINR) ||
+          typeof savedItem.imageUrl !== "string" ||
+          typeof savedItem.categoryId !== "string" ||
+          typeof savedItem.isAvailable !== "boolean"
+        ) {
+          throw new Error("Supabase returned incomplete product data.");
+        }
+        updatedItem = {
+          id: savedItem.id,
+          name: savedItem.name,
+          description: savedItem.description,
+          priceINR: savedItem.priceINR,
+          imageUrl: savedItem.imageUrl,
+          categoryId: savedItem.categoryId,
+          isAvailable: savedItem.isAvailable,
+        };
+      } else {
+        const response = await fetch("/api/menu-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description,
+            priceINR,
+            imageUrl,
+            categoryId: category.id,
+            isAvailable: form.isAvailable,
+            sortOrder: items.length,
+          }),
+          cache: "no-store",
+        });
+        let payload: unknown;
+        try {
+          payload = await response.json();
+        } catch {
+          payload = null;
+        }
+        if (!response.ok) {
+          const message =
+            isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : "Could not save the product to Supabase.";
+          throw new Error(message);
+        }
+        if (!isRecord(payload) || !isRecord(payload.item)) {
+          throw new Error("Supabase did not return the saved product.");
+        }
+
+        const savedItem = payload.item;
+        if (
+          typeof savedItem.id !== "string" ||
+          typeof savedItem.name !== "string" ||
+          typeof savedItem.description !== "string" ||
+          typeof savedItem.priceINR !== "number" ||
+          !Number.isFinite(savedItem.priceINR) ||
+          typeof savedItem.imageUrl !== "string" ||
+          typeof savedItem.categoryId !== "string" ||
+          typeof savedItem.isAvailable !== "boolean"
+        ) {
+          throw new Error("Supabase returned incomplete product data.");
+        }
+        updatedItem = {
+          id: savedItem.id,
+          name: savedItem.name,
+          description: savedItem.description,
+          priceINR: savedItem.priceINR,
+          imageUrl: savedItem.imageUrl,
+          categoryId: savedItem.categoryId,
+          isAvailable: savedItem.isAvailable,
+        };
+      }
+
+      const nextData: DemoData = {
+        ...data,
+        menuItems: existing
+          ? data.menuItems.map((item) => item.id === existing.id ? updatedItem : item)
+          : [...data.menuItems, updatedItem],
+      };
+      setData(nextData);
+      let cacheError = "";
+      try {
+        saveDemoData(nextData);
+      } catch {
+        cacheError = "Saved to Supabase, but the local menu cache could not be updated.";
+      }
+      setIsModalOpen(false);
+      resetForm();
+      setFeedback(
+        cacheError ||
+          (existing ? `"${name}" was updated.` : `"${name}" was added to the menu.`),
+      );
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Could not save this menu item.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deleteItem(item: DemoMenuItem) {
+    setActionError("");
+    setFeedback("");
+    if (!data) return;
+    if (!window.confirm(`Delete "${item.name}" from the menu? This cannot be undone.`)) {
+      return;
+    }
+    setProcessingItemId(item.id);
+    try {
+      const response = await fetch(
+        `/api/menu-items?id=${encodeURIComponent(item.id)}`,
+        { method: "DELETE", cache: "no-store" },
+      );
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not delete the product from Supabase.",
+        );
+      }
+      const nextData: DemoData = {
+        ...data,
+        menuItems: data.menuItems.filter((entry) => entry.id !== item.id),
+      };
+      setData(nextData);
+      let cacheError = "";
+      try {
+        saveDemoData(nextData);
+      } catch {
+        cacheError = "Deleted from Supabase, but the local menu cache could not be updated.";
+      }
+      if (cacheError) {
+        setFeedback(cacheError);
+        return;
+      }
+      setFeedback(`"${item.name}" was deleted.`);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Could not delete this product.");
+    } finally {
+      setProcessingItemId(null);
+    }
+  }
+
+  async function toggleAvailability(item: DemoMenuItem) {
+    setActionError("");
+    setFeedback("");
+    if (!data) return;
+    const isAvailable = !item.isAvailable;
+    setProcessingItemId(item.id);
+    try {
+      const response = await fetch("/api/menu-items", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemId: item.id, isAvailable }),
+        cache: "no-store",
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not update product availability in Supabase.",
+        );
+      }
+      if (
+        !isRecord(payload) ||
+        !isRecord(payload.item) ||
+        payload.item.id !== item.id ||
+        payload.item.isAvailable !== isAvailable
+      ) {
+        throw new Error("Supabase did not confirm the availability change.");
+      }
+      const nextData: DemoData = {
+        ...data,
+        menuItems: data.menuItems.map((entry) =>
+          entry.id === item.id ? { ...entry, isAvailable } : entry,
+        ),
+      };
+      setData(nextData);
+      let cacheError = "";
+      try {
+        saveDemoData(nextData);
+      } catch {
+        cacheError = "Availability saved to Supabase, but the local menu cache could not be updated.";
+      }
+      if (cacheError) {
+        setFeedback(cacheError);
+        return;
+      }
+      setFeedback(`"${item.name}" is now ${isAvailable ? "available" : "unavailable"}.`);
+    } catch (cause) {
+      setActionError(
+        cause instanceof Error ? cause.message : "Could not update item availability.",
+      );
+    } finally {
+      setProcessingItemId(null);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f5f6f2] text-[#202521] md:flex">
+      <aside className="hidden w-[248px] shrink-0 border-r border-[#e5e8e2] bg-white px-4 py-6 md:flex md:flex-col">
+        <Brand />
+        <p className="mb-3 mt-10 px-3 text-[10px] font-bold tracking-[0.16em] text-[#929a93]">WORKSPACE</p>
+        <nav aria-label="Admin navigation" className="space-y-1">
+          {navigation.map((item) => <NavigationLink key={item.label} {...item} />)}
+        </nav>
+        <AdminIdentity />
+      </aside>
+
+      <div className="min-w-0 flex-1">
+        <header className="border-b border-[#e5e8e2] bg-white px-5 py-4 sm:px-8 md:px-10">
+          <div className="flex items-center justify-between gap-3">
+            <div className="md:hidden"><Brand /></div>
+            <p className="hidden text-sm font-medium text-[#535b55] md:block">Menu management</p>
+            <SignOutButton />
+          </div>
+          <nav aria-label="Admin navigation" className="mt-4 flex gap-2 overflow-x-auto md:hidden">
+            {navigation.map((item) => <NavigationLink key={item.label} {...item} mobile />)}
+          </nav>
+        </header>
+
+        <main className="mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="mb-1 text-[10px] font-bold tracking-[0.16em] text-[#f97316]">MENU MANAGEMENT</p>
+              <h1 className="text-2xl font-bold tracking-tight sm:text-[27px]">Menu items</h1>
+              <p className="mt-1 text-sm text-[#9299a6]">A clear view of your dishes, categories, pricing, and availability.</p>
+            </div>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(249,115,22,0.16)] transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!data || categories.length === 0}
+              onClick={openAddModal}
+              type="button"
+            >
+              <Icon name="plus" />
+              Add item
+            </button>
+          </div>
+
+          {(loadError || actionError || feedback) && (
+            <div
+              aria-live="polite"
+              className={`mb-5 rounded-xl border p-4 text-sm ${
+                loadError || actionError
+                  ? "border-[#f1d8d5] bg-[#fff5f4] text-[#a3423c]"
+                  : "border-[#d7e8dc] bg-[#edf5ef] text-[#185c43]"
+              }`}
+              role={loadError || actionError ? "alert" : "status"}
+            >
+              {loadError || actionError || feedback}
+              {loadError && (
+                <button className="ml-3 font-semibold underline" onClick={refreshData} type="button">
+                  Try again
+                </button>
+              )}
+            </div>
+          )}
+
+          {data && categories.length === 0 && (
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#e7dcc8] bg-[#fbf6ed] p-4 text-sm text-[#705a35]">
+              <span>Create a category before adding menu items.</span>
+              <Link className="font-semibold underline" href="/admin/categories">Manage categories</Link>
+            </div>
+          )}
+
+          <section className="overflow-hidden rounded-2xl border border-[#2a2e38] bg-[#171a20] shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+            <div className="flex flex-col gap-4 border-b border-[#2a2e38] px-5 py-5 sm:px-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold text-[#f3f4f6]">Menu catalogue</h2>
+                  <p className="mt-1 text-xs text-[#9299a6]">
+                    {items.length} {items.length === 1 ? "item" : "items"} · {items.filter((item) => item.isAvailable).length} available
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 rounded-full border border-[#30343d] bg-[#20242c] px-3 py-1.5 text-xs text-[#b8bdc7]">
+                  <span className="size-2 rounded-full bg-[#f97316]" />
+                  {filteredItems.length} shown
+                </div>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_240px]">
+                <label className="relative block">
+                  <span className="sr-only">Search menu items</span>
+                  <span className="pointer-events-none absolute inset-y-0 left-3 grid place-items-center text-[#747b75]">
+                    <Icon name="search" />
+                  </span>
+                  <input
+                    className={`${inputClass} pl-10`}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder="Search dishes, details, or category"
+                    type="search"
+                    value={search}
+                  />
+                </label>
+                <label className="sr-only" htmlFor="category-filter">Filter by category</label>
+                <select
+                  className={inputClass}
+                  id="category-filter"
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                  value={categoryFilter}
+                >
+                  <option value="all">All categories</option>
+                  {sortedCategories.map((category) => (
+                    <option key={category.id} value={category.id}>{category.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div
+                aria-label="Quick category filters"
+                className="flex gap-2 overflow-x-auto pb-1"
+                role="group"
+              >
+                <CategoryFilter
+                  active={categoryFilter === "all"}
+                  count={items.length}
+                  label="All"
+                  onClick={() => setCategoryFilter("all")}
+                />
+                {sortedCategories.map((category) => (
+                  <CategoryFilter
+                    active={categoryFilter === category.id}
+                    count={categoryCounts.get(category.id) ?? 0}
+                    key={category.id}
+                    label={category.name}
+                    onClick={() => setCategoryFilter(category.id)}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {!data ? (
+              <p className="px-6 py-10 text-center text-sm text-[#747b75]">
+                {loadError ? "Menu data could not be loaded." : "Loading menu items…"}
+              </p>
+            ) : filteredItems.length ? (
+              <div className="divide-y divide-[#2a2e38]">
+                {filteredGroups.map(({ category, items: groupItems }) => (
+                  <section
+                    aria-label={`${category.name} menu items`}
+                    className="p-4 sm:p-5"
+                    key={category.id}
+                  >
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="size-1.5 shrink-0 rounded-full bg-[#f97316]" />
+                        <h3 className="truncate text-sm font-semibold text-[#f3f4f6]">
+                          {category.name}
+                        </h3>
+                        {!category.isActive && (
+                          <span className="rounded-full border border-[#3c414b] bg-[#242830] px-2 py-0.5 text-[10px] font-medium text-[#a7adba]">
+                            Inactive category
+                          </span>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-xs text-[#777e89]">
+                        {groupItems.length} {groupItems.length === 1 ? "item" : "items"}
+                      </span>
+                    </div>
+                    <div className="overflow-hidden rounded-xl border border-[#30343d] bg-[#1c2027]">
+                      {groupItems.map((item) => (
+                        <MenuItemCard
+                          category={category}
+                          item={item}
+                          key={item.id}
+                          onDelete={deleteItem}
+                          onEdit={openEditModal}
+                          onToggleAvailability={toggleAvailability}
+                          busy={processingItemId !== null}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <div className="px-6 py-14 text-center">
+                <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#e5f1eb] text-[#185c43]">
+                  <Icon name="menu" />
+                </span>
+                <h3 className="mt-4 text-sm font-semibold">
+                  {items.length === 0 ? "No menu items yet" : "No matching menu items"}
+                </h3>
+                <p className="mt-1 text-sm text-[#747b75]">
+                  {items.length === 0
+                    ? categories.length
+                      ? "Add your first dish to start building the menu."
+                      : "Add a category first, then create your first menu item."
+                    : "Try another search or category filter."}
+                </p>
+                {items.length === 0 && categories.length > 0 && (
+                  <button
+                    className="mt-4 rounded-lg bg-[#185c43] px-4 py-2 text-xs font-semibold text-white hover:bg-[#124b36]"
+                    onClick={openAddModal}
+                    type="button"
+                  >
+                    Add your first item
+                  </button>
+                )}
+              </div>
+            )}
+          </section>
+          <p className="mt-5 text-center text-xs text-[#929a93]">
+            Product changes are saved to Supabase.
+          </p>
+        </main>
+      </div>
+
+      {isModalOpen && (
+        <ItemModal
+          categories={sortedCategories}
+          editing={editingId !== null}
+          error={actionError}
+          form={form}
+          saving={isSaving || isUploadingImage}
+          uploadingImage={isUploadingImage}
+          uploadFeedback={feedback}
+          onChange={setForm}
+          onClose={() => {
+            setIsModalOpen(false);
+            setActionError("");
+          }}
+          onUploadImage={uploadMenuItemImage}
+          onSave={saveItem}
+        />
+      )}
+    </div>
+  );
+}
+
+function MenuItemCard({
+  item,
+  category,
+  busy,
+  onDelete,
+  onEdit,
+  onToggleAvailability,
+}: {
+  item: DemoMenuItem;
+  category: DemoCategory | undefined;
+  busy: boolean;
+  onDelete: (item: DemoMenuItem) => void;
+  onEdit: (item: DemoMenuItem) => void;
+  onToggleAvailability: (item: DemoMenuItem) => void;
+}) {
+  return (
+    <article className="flex flex-col gap-4 border-b border-[#2a2e38] p-4 last:border-b-0 hover:bg-[#20242c]/60 sm:flex-row sm:items-center sm:p-5">
+      <ItemImage item={item} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <h4 className="font-semibold text-[#f3f4f6]">{item.name}</h4>
+          <span className="rounded-full border border-[#493021] bg-[#2c211b] px-2.5 py-1 text-[10px] font-semibold text-[#ff9a4d]">
+            {category?.name ?? "Uncategorized"}
+          </span>
+        </div>
+        <p className="mt-1 line-clamp-2 text-sm leading-5 text-[#9299a6]">
+          {item.description || "No description"}
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="font-semibold tabular-nums text-[#f3f4f6]">{formatINR.format(item.priceINR)}</span>
+          <button
+            aria-label={`Mark ${item.name} as ${item.isAvailable ? "unavailable" : "available"}`}
+            aria-pressed={item.isAvailable}
+            className="inline-flex items-center gap-2 rounded-full border border-[#30343d] bg-[#171a20] px-2.5 py-1 text-[11px] font-medium text-[#c5cad3] transition hover:border-[#484d58]"
+            disabled={busy}
+            onClick={() => onToggleAvailability(item)}
+            type="button"
+          >
+            <span className={`relative h-4 w-7 rounded-full transition ${item.isAvailable ? "bg-[#f97316]" : "bg-[#4a505b]"}`}>
+              <span className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition ${item.isAvailable ? "left-[14px]" : "left-0.5"}`} />
+            </span>
+            {item.isAvailable ? "Available" : "Unavailable"}
+          </button>
+        </div>
+      </div>
+      <div className="flex gap-2 sm:ml-auto sm:shrink-0">
+        <button
+          className="rounded-lg border border-[#383d47] px-3 py-1.5 text-xs font-medium text-[#c5cad3] transition hover:border-[#f97316] hover:text-[#ff9a4d]"
+          disabled={busy}
+          onClick={() => onEdit(item)}
+          type="button"
+        >
+          Edit
+        </button>
+        <button
+          className="rounded-lg border border-[#493134] px-3 py-1.5 text-xs font-medium text-[#ff958a] transition hover:border-[#a25349] hover:bg-[#2b1f20]"
+          disabled={busy}
+          onClick={() => onDelete(item)}
+          type="button"
+        >
+          Delete
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function CategoryFilter({
+  active,
+  count,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-pressed={active}
+      className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-medium transition ${
+        active
+          ? "border-[#f97316] bg-[#2c211b] text-[#ff9a4d]"
+          : "border-[#30343d] bg-[#1c2027] text-[#9299a6] hover:border-[#484d58] hover:text-[#f3f4f6]"
+      }`}
+      onClick={onClick}
+      type="button"
+    >
+      {label}
+      <span className={active ? "text-[#ffb47b]" : "text-[#777e89]"}>{count}</span>
+    </button>
+  );
+}
+
+function ItemModal({
+  categories,
+  editing,
+  error,
+  form,
+  saving,
+  uploadingImage,
+  uploadFeedback,
+  onChange,
+  onClose,
+  onUploadImage,
+  onSave,
+}: {
+  categories: DemoCategory[];
+  editing: boolean;
+  error: string;
+  form: ItemForm;
+  saving: boolean;
+  uploadingImage: boolean;
+  uploadFeedback: string;
+  onChange: (value: ItemForm) => void;
+  onClose: () => void;
+  onUploadImage: (file: File) => void;
+  onSave: (event: React.FormEvent<HTMLFormElement>) => void;
+}) {
+  const selectableCategories = categories.filter(
+    (category) => category.isActive || category.id === form.categoryId,
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-[#17251d]/45 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !saving) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="item-modal-title"
+        aria-modal="true"
+        className="my-auto w-full max-w-lg rounded-2xl border border-[#e5e8e2] bg-white p-6 shadow-xl"
+        role="dialog"
+      >
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold" id="item-modal-title">{editing ? "Edit menu item" : "Add menu item"}</h2>
+            <p className="mt-1 text-sm text-[#747b75]">Add the details guests see on your menu.</p>
+          </div>
+          <button
+            aria-label="Close dialog"
+            className="grid size-8 shrink-0 place-items-center rounded-lg text-[#747b75] hover:bg-[#f5f6f2] disabled:opacity-50"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            <Icon name="close" />
+          </button>
+        </div>
+
+        <form className="space-y-4" onSubmit={onSave}>
+          <div>
+            <span className="mb-1.5 block text-sm font-medium">Item image</span>
+            <div className="flex items-center gap-4">
+              <ItemImage item={{ name: form.name, imageUrl: form.imageUrl }} />
+              <div className="min-w-0 flex-1">
+                <label className="mb-1.5 block text-xs text-[#747b75]" htmlFor="item-image-upload">
+                  Upload or replace image (JPEG, PNG, WebP, or AVIF; max 5 MiB)
+                </label>
+                <input
+                  accept="image/jpeg,image/png,image/webp,image/avif"
+                  className="block w-full text-xs text-[#535b55] file:mr-3 file:rounded-lg file:border-0 file:bg-[#e5f1eb] file:px-3 file:py-2 file:text-xs file:font-semibold file:text-[#185c43] hover:file:bg-[#d7e8dc] disabled:opacity-50"
+                  disabled={saving}
+                  id="item-image-upload"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) onUploadImage(file);
+                    event.currentTarget.value = "";
+                  }}
+                  type="file"
+                />
+                {uploadingImage && (
+                  <p className="mt-1.5 text-xs text-[#747b75]" role="status">
+                    Uploading image…
+                  </p>
+                )}
+                {!uploadingImage && uploadFeedback && (
+                  <p className="mt-1.5 text-xs text-[#185c43]" role="status">
+                    {uploadFeedback}
+                  </p>
+                )}
+                <label className="mb-1.5 mt-3 block text-xs text-[#747b75]" htmlFor="item-image">
+                  Or paste a public image URL
+                </label>
+                <input
+                  className={inputClass}
+                  disabled={saving}
+                  id="item-image"
+                  onChange={(event) => onChange({ ...form, imageUrl: event.target.value })}
+                  placeholder="https://example.com/dish.jpg"
+                  type="url"
+                  value={form.imageUrl}
+                />
+              </div>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium" htmlFor="item-name">Name</label>
+            <input
+              autoFocus
+              className={inputClass}
+              id="item-name"
+              maxLength={100}
+              onChange={(event) => onChange({ ...form, name: event.target.value })}
+              placeholder="e.g. Garden Herb Pasta"
+              required
+              value={form.name}
+            />
+          </div>
+          <div>
+            <label className="mb-1.5 block text-sm font-medium" htmlFor="item-description">Description</label>
+            <textarea
+              className="w-full rounded-[10px] border border-[#e5e8e2] bg-white px-3 py-2.5 text-sm outline-none focus:border-[#185c43] focus:ring-2 focus:ring-[#185c43]/15"
+              id="item-description"
+              maxLength={300}
+              onChange={(event) => onChange({ ...form, description: event.target.value })}
+              placeholder="Describe the dish and its ingredients"
+              rows={3}
+              value={form.description}
+            />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label className="mb-1.5 block text-sm font-medium" htmlFor="item-price">Price (INR)</label>
+              <input
+                className={inputClass}
+                id="item-price"
+                min="0"
+                onChange={(event) => onChange({ ...form, price: event.target.value })}
+                required
+                step="0.01"
+                type="number"
+                value={form.price}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-sm font-medium" htmlFor="item-category">Category</label>
+              <select
+                className={inputClass}
+                id="item-category"
+                onChange={(event) => onChange({ ...form, categoryId: event.target.value })}
+                required
+                value={form.categoryId}
+              >
+                <option disabled value="">Select a category</option>
+                {selectableCategories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}{category.isActive ? "" : " (inactive)"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <label className="flex items-center gap-2.5 text-sm text-[#535b55]">
+            <input
+              checked={form.isAvailable}
+              className="size-4 accent-[#185c43]"
+              onChange={(event) => onChange({ ...form, isAvailable: event.target.checked })}
+              type="checkbox"
+            />
+            Available to order
+          </label>
+          {error && <p className="text-sm text-[#a3423c]" role="alert">{error}</p>}
+          <div className="flex justify-end gap-3 border-t border-[#edf0eb] pt-4">
+            <button
+              className="h-10 rounded-[10px] border border-[#e5e8e2] px-4 text-sm font-medium text-[#535b55] hover:bg-[#f8f9f6] disabled:opacity-50"
+              disabled={saving}
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="h-10 rounded-[10px] bg-[#185c43] px-4 text-sm font-semibold text-white hover:bg-[#124b36] disabled:opacity-50"
+              disabled={saving}
+              type="submit"
+            >
+              {uploadingImage
+                ? "Uploading…"
+                : saving
+                  ? "Saving…"
+                  : editing
+                    ? "Save changes"
+                    : "Add item"}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+
+function ItemImage({ item }: { item: Pick<DemoMenuItem, "name" | "imageUrl"> }) {
+  return (
+    <div
+      aria-label={`${item.name || "Menu item"} image`}
+      className="relative grid size-[76px] shrink-0 place-items-center overflow-hidden rounded-xl border border-[#e5e8e2] bg-gradient-to-br from-[#eef3e8] via-[#f5e9d4] to-[#e1eadc] sm:size-[84px]"
+      role="img"
+      style={
+        item.imageUrl
+          ? {
+              backgroundImage: `url("${item.imageUrl}")`,
+              backgroundPosition: "center",
+              backgroundSize: "cover",
+            }
+          : undefined
+      }
+    >
+      {!item.imageUrl && (
+        <>
+          <span className="absolute size-12 rounded-full border-[5px] border-white/90 shadow-sm" />
+          <span className="absolute size-7 rounded-full bg-[#d9a36c]/80" />
+          <span className="absolute -right-1 top-2 size-5 rounded-full bg-[#7b9b67]/80 blur-[1px]" />
+          <span className="absolute bottom-2 left-2 size-3 rounded-full bg-[#c9664e]/80" />
+        </>
+      )}
+    </div>
+  );
+}
+
+function AdminIdentity() {
+  return (
+    <div className="mt-auto border-t border-[#e5e8e2] pt-5">
+      <div className="flex items-center gap-3 px-2">
+        <span className="grid size-9 place-items-center rounded-xl bg-[#e5f1eb] text-xs font-bold text-[#185c43]">VR</span>
+        <span>
+          <span className="block text-sm font-semibold">Virtual Rudra</span>
+          <span className="block text-xs text-[#747b75]">Restaurant admin · demo</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function Brand() {
+  return (
+    <Link className="flex items-center gap-3 font-bold text-[#202521]" href="/admin/dashboard">
+      <span className="grid size-9 place-items-center rounded-xl bg-[#185c43] text-white">
+        <Icon name="restaurant" />
+      </span>
+      <span className="whitespace-nowrap">Virtual Rudra</span>
+    </Link>
+  );
+}
+
+function NavigationLink({
+  label,
+  href,
+  icon,
+  active = false,
+  mobile = false,
+}: {
+  label: string;
+  href: string;
+  icon: "dashboard" | "category" | "menu" | "profile";
+  active?: boolean;
+  mobile?: boolean;
+}) {
+  return (
+    <Link
+      aria-current={active ? "page" : undefined}
+      className={`flex shrink-0 items-center gap-3 rounded-[10px] px-3 font-medium transition ${
+        mobile ? "py-2 text-xs" : "py-3 text-sm"
+      } ${
+        active
+          ? "bg-[#e5f1eb] text-[#185c43]"
+          : "text-[#747b75] hover:bg-[#f8f9f6] hover:text-[#202521]"
+      }`}
+      href={href}
+    >
+      <Icon name={icon} />
+      {label}
+    </Link>
+  );
+}
+
+function Icon({
+  name,
+}: {
+  name: "dashboard" | "category" | "menu" | "profile" | "plus" | "search" | "close" | "restaurant";
+}) {
+  const paths = {
+    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    category: <><path d="M20 13 13 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3l7-7h7a2 2 0 0 1 2 2Z" /><circle cx="15.5" cy="8.5" r="1" /></>,
+    menu: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
+    profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    plus: <path d="M12 5v14M5 12h14" />,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
+    close: <path d="m6 6 12 12M18 6 6 18" />,
+    restaurant: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
+  };
+
+  return (
+    <svg
+      aria-hidden="true"
+      className="size-[18px] shrink-0"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    >
+      {paths[name]}
+    </svg>
+  );
+}
