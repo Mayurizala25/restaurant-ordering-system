@@ -1,0 +1,23 @@
+{
+  "expo": {
+    "name": "Virtual Rudra",
+    "slug": "virtual-rudra",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "permissions": ["android.permission.CAMERA"]
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Virtual Rudra to scan table QR codes.",
+          "recordAudioAndroid": false
+        }
+      ]
+    ]
+  }
+}
