@@ -97,7 +97,16 @@ function validateOrderInput(value: unknown): OrderInput | null {
 export async function GET() {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
-  if (!(await verifyAdminSessionToken(sessionToken))) {
+  let validSession: boolean;
+  try {
+    validSession = await verifyAdminSessionToken(sessionToken);
+  } catch {
+    return Response.json(
+      { error: "Admin session verification is temporarily unavailable. Try again." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  if (!validSession) {
     return Response.json(
       { error: "Admin authentication is required." },
       { status: 401, headers: { "Cache-Control": "no-store" } },
@@ -151,10 +160,12 @@ export async function GET() {
   ordersUrl.searchParams.set("order", "created_at.desc");
 
   let response: Response;
+  const timeoutSignal = AbortSignal.timeout(10_000);
   try {
     response = await fetch(ordersUrl, {
       method: "GET",
       cache: "no-store",
+      signal: timeoutSignal,
       headers: {
         apikey: supabaseServiceRoleKey,
         Accept: "application/json",
@@ -162,8 +173,15 @@ export async function GET() {
     });
   } catch {
     return Response.json(
-      { error: "Could not load orders." },
-      { status: 502, headers: { "Cache-Control": "no-store" } },
+      {
+        error: timeoutSignal.aborted
+          ? "Loading orders timed out. Try again."
+          : "Could not load orders.",
+      },
+      {
+        status: timeoutSignal.aborted ? 504 : 502,
+        headers: { "Cache-Control": "no-store" },
+      },
     );
   }
 
@@ -179,8 +197,15 @@ export async function GET() {
     orders = await response.json();
   } catch {
     return Response.json(
-      { error: "Order data could not be read." },
-      { status: 502, headers: { "Cache-Control": "no-store" } },
+      {
+        error: timeoutSignal.aborted
+          ? "Loading orders timed out. Try again."
+          : "Order data could not be read.",
+      },
+      {
+        status: timeoutSignal.aborted ? 504 : 502,
+        headers: { "Cache-Control": "no-store" },
+      },
     );
   }
 

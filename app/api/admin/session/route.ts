@@ -11,6 +11,7 @@ import {
   verifyAdminSessionToken,
 } from "../../../../lib/admin-session";
 
+const MAX_BODY_BYTES = 16_384;
 const cookieOptions = {
   httpOnly: true,
   maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
@@ -49,7 +50,16 @@ export async function GET() {
 
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
-  if (!(await verifyAdminSessionToken(token))) {
+  let validSession: boolean;
+  try {
+    validSession = await verifyAdminSessionToken(token);
+  } catch {
+    return Response.json(
+      { authenticated: false, error: "Admin session verification is temporarily unavailable. Try again." },
+      { status: 503, headers: noStoreHeaders },
+    );
+  }
+  if (!validSession) {
     return Response.json(
       { authenticated: false },
       { status: 401, headers: noStoreHeaders },
@@ -70,32 +80,55 @@ export async function POST(request: Request) {
     );
   }
 
-  let rateLimit: Awaited<ReturnType<typeof checkLoginRateLimit>>;
+  const contentLength = Number(request.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > MAX_BODY_BYTES) {
+    return Response.json(
+      { error: "The sign-in request is too large." },
+      { status: 413, headers: noStoreHeaders },
+    );
+  }
+
+  const reader = request.body?.getReader();
+  if (!reader) {
+    return Response.json(
+      { error: "Enter a valid email address and password." },
+      { status: 400, headers: noStoreHeaders },
+    );
+  }
+
+  const bodyChunks: Uint8Array[] = [];
+  let bodySize = 0;
   try {
-    rateLimit = await checkLoginRateLimit(request);
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bodySize += value.byteLength;
+      if (bodySize > MAX_BODY_BYTES) {
+        await reader.cancel();
+        return Response.json(
+          { error: "The sign-in request is too large." },
+          { status: 413, headers: noStoreHeaders },
+        );
+      }
+      bodyChunks.push(value);
+    }
   } catch {
-    rateLimit = null;
-  }
-  if (!rateLimit) {
     return Response.json(
-      { error: "Sign-in is temporarily unavailable. Try again shortly." },
-      { status: 503, headers: noStoreHeaders },
+      { error: "The sign-in request could not be read." },
+      { status: 400, headers: noStoreHeaders },
     );
   }
-  if (!rateLimit.success) {
-    const retryAfter = Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000));
-    return Response.json(
-      { error: "Too many sign-in attempts. Try again later." },
-      {
-        status: 429,
-        headers: { ...noStoreHeaders, "Retry-After": String(retryAfter) },
-      },
-    );
+
+  const bodyBytes = new Uint8Array(bodySize);
+  let bodyOffset = 0;
+  for (const chunk of bodyChunks) {
+    bodyBytes.set(chunk, bodyOffset);
+    bodyOffset += chunk.byteLength;
   }
 
   let credentials: unknown;
   try {
-    credentials = await request.json();
+    credentials = JSON.parse(new TextDecoder().decode(bodyBytes));
   } catch {
     return Response.json(
       { error: "Enter a valid email address and password." },
@@ -118,6 +151,28 @@ export async function POST(request: Request) {
   }
 
   if (!verifyAdminCredentials(credentials.email, credentials.password)) {
+    let rateLimit: Awaited<ReturnType<typeof checkLoginRateLimit>>;
+    try {
+      rateLimit = await checkLoginRateLimit(request);
+    } catch {
+      rateLimit = null;
+    }
+    if (!rateLimit) {
+      return Response.json(
+        { error: "Sign-in is temporarily unavailable. Try again shortly." },
+        { status: 503, headers: noStoreHeaders },
+      );
+    }
+    if (!rateLimit.success) {
+      const retryAfter = Math.max(1, Math.ceil((rateLimit.reset - Date.now()) / 1000));
+      return Response.json(
+        { error: "Too many sign-in attempts. Try again later." },
+        {
+          status: 429,
+          headers: { ...noStoreHeaders, "Retry-After": String(retryAfter) },
+        },
+      );
+    }
     return Response.json(
       { error: "Email or password is incorrect." },
       { status: 401, headers: noStoreHeaders },

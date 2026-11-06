@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import CustomerThemeToggle from "../../customer/customer-theme-toggle";
 
 type TrackedOrder = {
   orderNumber: string;
@@ -120,9 +121,11 @@ export default function OrderTrackingClient({ token }: { token: string }) {
 
     void refresh();
     const interval = window.setInterval(() => void refresh(), 5000);
+    window.addEventListener("virtual-rudra:refresh", refresh);
     return () => {
       active = false;
       window.clearInterval(interval);
+      window.removeEventListener("virtual-rudra:refresh", refresh);
     };
   }, [token]);
 
@@ -130,23 +133,24 @@ export default function OrderTrackingClient({ token }: { token: string }) {
   const isTerminal = order?.status === "served" || order?.status === "cancelled";
 
   return (
-    <main className="vr-menu-page">
+    <main className="vr-menu-page" data-customer-theme="light">
       <div className="vr-menu-shell">
         <header className="vr-menu-header">
           <Link aria-label="Virtual Rudra menu home" className="vr-menu-brand" href="/menu">
             <Image
               alt=""
               className="vr-menu-brand-mark"
-              height={42}
+              height={403}
               src="/brand/virtual-rudra-logo.png?v=2"
               unoptimized
-              width={56}
+              width={587}
             />
             <span>
               <strong>Virtual Rudra</strong>
               <small>RESTAURANT &amp; KITCHEN</small>
             </span>
           </Link>
+          <CustomerThemeToggle />
           <span className="vr-menu-header-note">
             <i aria-hidden="true" />
             Order tracking

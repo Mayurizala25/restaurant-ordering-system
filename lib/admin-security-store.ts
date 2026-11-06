@@ -1,6 +1,7 @@
 import "server-only";
 
 type JsonRecord = Record<string, unknown>;
+const ADMIN_SECURITY_RPC_TIMEOUT_MS = 10_000;
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -46,6 +47,7 @@ async function callAdminSecurityRpc(
         Accept: "application/json",
       },
       body: JSON.stringify(parameters),
+      signal: AbortSignal.timeout(ADMIN_SECURITY_RPC_TIMEOUT_MS),
     });
   } catch {
     throw new Error("Admin security storage is unavailable.");

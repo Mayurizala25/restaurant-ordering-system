@@ -9,6 +9,7 @@ import {
   type DemoMenuItem,
   type DemoTable,
 } from "../admin/_lib/demo-data";
+import CustomerThemeToggle from "../customer/customer-theme-toggle";
 
 const CART_STORAGE_KEY = "virtual-rudra.order.cart";
 const ORDER_CONFIRMATION_STORAGE_KEY = "virtual-rudra.order.confirmation";
@@ -263,6 +264,8 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const [menuRetryCount, setMenuRetryCount] = useState(0);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [selectedDish, setSelectedDish] = useState<DemoMenuItem | null>(null);
+  const dishDetailsRef = useRef<HTMLDialogElement>(null);
   const [tableId, setTableId] = useState<string | null>(null);
   const [qrTableNumber, setQrTableNumber] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -283,6 +286,13 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [feedbackError, setFeedbackError] = useState("");
   const recordedQrScans = useRef(new Set<string>());
+
+  useEffect(() => {
+    const dialog = dishDetailsRef.current;
+    if (!dialog) return;
+    if (selectedDish && !dialog.open) dialog.showModal();
+    if (!selectedDish && dialog.open) dialog.close();
+  }, [selectedDish]);
 
   useEffect(() => {
     let active = true;
@@ -417,6 +427,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       recordTableQrScan(scannedTableId);
     };
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("virtual-rudra:refresh", handleFocus);
     window.addEventListener("popstate", handlePopState);
     document.addEventListener("visibilitychange", handleVisibility);
 
@@ -424,6 +435,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       window.clearTimeout(initializeTimer);
       active = false;
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("virtual-rudra:refresh", handleFocus);
       window.removeEventListener("popstate", handlePopState);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
@@ -747,17 +759,20 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   }
 
   return (
-    <main className={`vr-menu-page${page === "menu" && cartItemCount > 0 ? " has-cart-bar" : ""}`}>
+    <main
+      className={`vr-menu-page${page === "menu" && cartItemCount > 0 ? " has-cart-bar" : ""}`}
+      data-customer-theme="light"
+    >
       <div className="vr-menu-shell">
         <header className="vr-menu-header">
           <Link aria-label="Virtual Rudra menu home" className="vr-menu-brand" href={tableHref("/menu")}>
             <Image
               alt=""
               className="vr-menu-brand-mark"
-              height={42}
+              height={403}
               src="/brand/virtual-rudra-logo.png?v=2"
               unoptimized
-              width={56}
+              width={587}
             />
             <span>
               <strong>Virtual Rudra</strong>
@@ -776,6 +791,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               Checkout
             </Link>
           </nav>
+          <CustomerThemeToggle />
           <span className="vr-menu-header-note">
             <i aria-hidden="true" />
             Freshly made, always
@@ -1285,7 +1301,19 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
 
         {page === "menu" && <div className="vr-menu-results">
           {loadError ? (
-            <p className="vr-menu-message" role="alert">{loadError}</p>
+            <>
+              <p className="vr-menu-message" role="alert">{loadError}</p>
+              <button
+                className="vr-menu-place-order"
+                onClick={() => {
+                  setLoadError("");
+                  setMenuRetryCount((count) => count + 1);
+                }}
+                type="button"
+              >
+                Try again
+              </button>
+            </>
           ) : !data ? (
             <p className="vr-menu-message" role="status">Loading the menu…</p>
           ) : resultCount === 0 ? (
@@ -1346,7 +1374,14 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                           </div>
                           <div className="vr-menu-card-content">
                             <div className="vr-menu-card-title">
-                              <h3>{item.name}</h3>
+                              <button
+                                aria-label={`View details for ${item.name}`}
+                                className="vr-menu-details-button"
+                                onClick={() => setSelectedDish(item)}
+                                type="button"
+                              >
+                                {item.name}
+                              </button>
                               {!item.isAvailable && <span>Unavailable</span>}
                             </div>
                             {item.description && <p>{item.description}</p>}
@@ -1402,14 +1437,84 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             </>
           )}
         </div>}
+        <dialog
+          aria-labelledby="dish-details-title"
+          className="vr-menu-dish-dialog"
+          onClose={() => setSelectedDish(null)}
+          ref={dishDetailsRef}
+        >
+          {selectedDish && (
+            <div className="vr-menu-dish-dialog-content">
+              <button
+                aria-label="Close dish details"
+                className="vr-menu-dish-dialog-close"
+                onClick={() => setSelectedDish(null)}
+                type="button"
+              >
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </button>
+              <div className="vr-menu-dish-dialog-photo">
+                {selectedDish.imageUrl ? (
+                  <Image
+                    alt={selectedDish.name}
+                    fill
+                    sizes="(max-width: 700px) 100vw, 42vw"
+                    src={selectedDish.imageUrl}
+                    unoptimized
+                  />
+                ) : (
+                  <span aria-hidden="true" className="vr-menu-photo-mark">VR</span>
+                )}
+              </div>
+              <div className="vr-menu-dish-dialog-copy">
+                <p className="vr-menu-category-kicker">FROM OUR KITCHEN</p>
+                <h2 id="dish-details-title">{selectedDish.name}</h2>
+                {selectedDish.description && <p>{selectedDish.description}</p>}
+                <div className="vr-menu-dish-dialog-meta">
+                  {VEGETARIAN_ITEM_IDS.has(selectedDish.id) && (
+                    <span className="is-veg"><i aria-hidden="true" />Vegetarian</span>
+                  )}
+                  {SPECIAL_ITEM_IDS.has(selectedDish.id) && (
+                    <span className="is-special">Chef Special</span>
+                  )}
+                  {!selectedDish.isAvailable && <span>Currently unavailable</span>}
+                </div>
+                <div className="vr-menu-dish-dialog-action">
+                  <strong>{formatINR.format(selectedDish.priceINR)}</strong>
+                  <button
+                    className="vr-menu-place-order"
+                    disabled={
+                      !selectedDish.isAvailable ||
+                      isSubmittingOrder ||
+                      (cart.find((line) => line.itemId === selectedDish.id)
+                        ?.quantity ?? 0) >= MAX_ORDER_QUANTITY ||
+                      (!cart.some((line) => line.itemId === selectedDish.id) &&
+                        cart.length >= MAX_ORDER_LINES)
+                    }
+                    onClick={() => {
+                      addToCart(selectedDish);
+                      setSelectedDish(null);
+                    }}
+                    type="button"
+                  >
+                    {selectedDish.isAvailable ? "Add to order" : "Unavailable"}
+                    <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </dialog>
         <footer className="vr-menu-footer">
           <Image
             alt=""
             className="vr-menu-brand-mark"
-            height={28}
+            height={403}
             src="/brand/virtual-rudra-logo.png?v=2"
             unoptimized
-            width={38}
+            width={587}
           />
           <p>Virtual Rudra <span>·</span> Made for memorable meals</p>
         </footer>

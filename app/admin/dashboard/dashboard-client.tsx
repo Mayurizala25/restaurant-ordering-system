@@ -3,6 +3,13 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdmin } from "../_lib/admin-provider";
+import { AdminPageHeading } from "../_components/admin-page";
+import {
+  createTimeoutSignal,
+  fetchJsonWithTimeout,
+  RequestCancelledError,
+  RequestTimeoutError,
+} from "../_lib/request-timeout";
 
 const formatINR = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -185,6 +192,7 @@ export function AdminDashboardClient() {
   const dataFetchInFlight = useRef(false);
   const metricsFetchInFlight = useRef(false);
   const qrScansFetchInFlight = useRef(false);
+  const loadControllers = useRef(new Set<AbortController>());
   const orderStatusRevision = useRef(0);
   const lastScrolledOrder = useRef("");
   const orderStatusOverrides = useRef(
@@ -196,14 +204,15 @@ export function AdminDashboardClient() {
     dataFetchInFlight.current = true;
     setRefreshing(true);
     setDataError("");
+    const controller = new AbortController();
+    loadControllers.current.add(controller);
     try {
-      const [categoriesResponse, itemsResponse] = await Promise.all([
-        fetch("/api/categories", { cache: "no-store" }),
-        fetch("/api/menu-items", { cache: "no-store" }),
-      ]);
-      const [categoriesPayload, itemsPayload]: unknown[] = await Promise.all([
-        categoriesResponse.json().catch(() => null),
-        itemsResponse.json().catch(() => null),
+      const [
+        { response: categoriesResponse, payload: categoriesPayload },
+        { response: itemsResponse, payload: itemsPayload },
+      ] = await Promise.all([
+        fetchJsonWithTimeout("/api/categories",         { cache: "no-store", signal: controller.signal }, 15_000),
+        fetchJsonWithTimeout("/api/menu-items",         { cache: "no-store", signal: controller.signal }, 15_000),
       ]);
 
       if (!categoriesResponse.ok) {
@@ -235,12 +244,17 @@ export function AdminDashboardClient() {
         menuItems: itemsPayload.items,
       });
     } catch (cause) {
-      setDataError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not load restaurant menu data.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setDataError(
+          cause instanceof RequestTimeoutError
+            ? "Loading restaurant menu data timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load restaurant menu data.",
+        );
+      }
     } finally {
+      loadControllers.current.delete(controller);
       dataFetchInFlight.current = false;
       setRefreshing(false);
     }
@@ -251,11 +265,14 @@ export function AdminDashboardClient() {
     metricsFetchInFlight.current = true;
     setMetricsLoading(true);
     setMetricsError("");
+    const controller = new AbortController();
+    loadControllers.current.add(controller);
     try {
-      const response = await fetch("/api/admin/dashboard-stats", {
-        cache: "no-store",
-      });
-      const payload: unknown = await response.json().catch(() => null);
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/admin/dashboard-stats",
+        { cache: "no-store", signal: controller.signal },
+        20_000,
+      );
       if (!response.ok) {
         const message =
           isRecord(payload) && typeof payload.error === "string"
@@ -268,12 +285,17 @@ export function AdminDashboardClient() {
       }
       setMetrics(payload);
     } catch (cause) {
-      setMetricsError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not load dashboard statistics.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setMetricsError(
+          cause instanceof RequestTimeoutError
+            ? "Loading dashboard statistics timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load dashboard statistics.",
+        );
+      }
     } finally {
+      loadControllers.current.delete(controller);
       metricsFetchInFlight.current = false;
       setMetricsLoading(false);
     }
@@ -284,11 +306,14 @@ export function AdminDashboardClient() {
     qrScansFetchInFlight.current = true;
     setQrScansLoading(true);
     setQrScansError("");
+    const controller = new AbortController();
+    loadControllers.current.add(controller);
     try {
-      const response = await fetch("/api/admin/qr-analytics", {
-        cache: "no-store",
-      });
-      const payload: unknown = await response.json().catch(() => null);
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/admin/qr-analytics",
+        { cache: "no-store", signal: controller.signal },
+        15_000,
+      );
       if (!response.ok) {
         const message =
           isRecord(payload) && typeof payload.error === "string"
@@ -306,12 +331,17 @@ export function AdminDashboardClient() {
       }
       setQrScans(payload.totalScans);
     } catch (cause) {
-      setQrScansError(
-        cause instanceof Error
-          ? cause.message
-          : "Could not load QR scan statistics.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setQrScansError(
+          cause instanceof RequestTimeoutError
+            ? "Loading QR scan statistics timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load QR scan statistics.",
+        );
+      }
     } finally {
+      loadControllers.current.delete(controller);
       qrScansFetchInFlight.current = false;
       setQrScansLoading(false);
     }
@@ -323,14 +353,14 @@ export function AdminDashboardClient() {
     const revisionAtStart = orderStatusRevision.current;
     setOrdersLoading(true);
     setOrdersError("");
+    const controller = new AbortController();
+    loadControllers.current.add(controller);
     try {
-      const response = await fetch("/api/orders", { cache: "no-store" });
-      let payload: unknown;
-      try {
-        payload = await response.json();
-      } catch {
-        payload = null;
-      }
+      const { response, payload } = await fetchJsonWithTimeout(
+        "/api/orders",
+        { cache: "no-store", signal: controller.signal },
+        15_000,
+      );
 
       if (!response.ok) {
         const message =
@@ -361,10 +391,17 @@ export function AdminDashboardClient() {
       setOrders(refreshedOrders);
       setOrdersLastUpdated(new Date());
     } catch (cause) {
-      setOrdersError(
-        cause instanceof Error ? cause.message : "Could not load orders.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setOrdersError(
+          cause instanceof RequestTimeoutError
+            ? "Loading orders timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load orders.",
+        );
+      }
     } finally {
+      loadControllers.current.delete(controller);
       orderFetchInFlight.current = false;
       setOrdersLoading(false);
     }
@@ -379,12 +416,14 @@ export function AdminDashboardClient() {
         return next;
       });
 
+      const signal = createTimeoutSignal(20_000);
       try {
         const response = await fetch("/api/orders", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ orderId, status }),
           cache: "no-store",
+          signal,
         });
         let payload: unknown;
         try {
@@ -420,8 +459,9 @@ export function AdminDashboardClient() {
       } catch (cause) {
         setOrderStatusErrors((current) => ({
           ...current,
-          [orderId]:
-            cause instanceof Error
+          [orderId]: signal.aborted
+            ? "Updating the order status timed out. Try again."
+            : cause instanceof Error
               ? cause.message
               : "Could not update the order status.",
         }));
@@ -433,23 +473,30 @@ export function AdminDashboardClient() {
   );
 
   useEffect(() => {
+    const controllers = loadControllers.current;
     void refreshData();
-    const handleFocus = () => {
+    const refreshDashboard = () => {
       void refreshData();
       void refreshMetrics();
       void refreshQrScans();
+      void refreshOrders();
     };
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") handleFocus();
+      if (document.visibilityState === "visible") refreshDashboard();
     };
 
-    window.addEventListener("focus", handleFocus);
+    window.addEventListener("focus", refreshDashboard);
+    window.addEventListener("pageshow", refreshDashboard);
+    window.addEventListener("virtual-rudra:refresh", refreshDashboard);
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
-      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("focus", refreshDashboard);
+      window.removeEventListener("pageshow", refreshDashboard);
+      window.removeEventListener("virtual-rudra:refresh", refreshDashboard);
       document.removeEventListener("visibilitychange", handleVisibility);
+      for (const controller of controllers) controller.abort();
     };
-  }, [refreshData, refreshMetrics, refreshQrScans]);
+  }, [refreshData, refreshMetrics, refreshOrders, refreshQrScans]);
 
   useEffect(() => {
     void refreshMetrics();
@@ -500,6 +547,22 @@ export function AdminDashboardClient() {
     );
   }
   const menuHighlights = items.slice(0, 5);
+  const recentOrderStatuses = [
+    { label: "Pending", statuses: ["pending"], color: "#d9922e" },
+    {
+      label: "In progress",
+      statuses: ["accepted", "preparing", "ready"],
+      color: "#f97316",
+    },
+    { label: "Served", statuses: ["served"], color: "#29996a" },
+    { label: "Cancelled", statuses: ["cancelled"], color: "#cb6157" },
+  ].map((group) => ({
+    ...group,
+    count:
+      orders?.filter((order) => group.statuses.includes(order.status)).length ??
+      0,
+  }));
+  const recentOrderCount = orders?.length ?? 0;
   const summary = [
     {
       label: "Total orders",
@@ -577,20 +640,12 @@ export function AdminDashboardClient() {
 
   return (
     <div className="vr-dashboard-page">
-      <main className="mx-auto w-full max-w-[1450px] px-4 py-4 sm:px-8 sm:py-7 md:px-10 md:py-8">
-          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="mb-1 text-[10px] font-bold tracking-[0.16em] text-[#185c43]">
-                YOUR RESTAURANT
-              </p>
-              <h1 className="text-2xl font-bold tracking-tight sm:text-[27px]">
-                Virtual Rudra dashboard
-              </h1>
-              <p className="mt-1 text-sm text-[#747b75]">
-                Orders and performance for your restaurant.
-              </p>
-            </div>
-          </div>
+      <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-4 py-4 sm:px-8 sm:py-7 md:px-10 md:py-8">
+          <AdminPageHeading
+            description="Orders and performance for your restaurant."
+            eyebrow="YOUR RESTAURANT"
+            title="Virtual Rudra dashboard"
+          />
 
           {dataError && (
             <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#f1d8d5] bg-[#fff5f4] p-4 text-sm text-[#a3423c]" role="alert">
@@ -787,6 +842,59 @@ export function AdminDashboardClient() {
                       category={categories.find((entry) => entry.id === item.categoryId)}
                       key={item.id}
                     />
+                  ))}
+                </ul>
+              )}
+            </section>
+
+            <section
+              aria-labelledby="recent-order-status-heading"
+              className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+            >
+              <div className="border-b border-[#e5e8e2] px-5 py-4">
+                <h2 className="font-bold" id="recent-order-status-heading">
+                  Recent order mix
+                </h2>
+                <p className="mt-1 text-xs text-[#747b75]">
+                  Status of the latest {recentOrderCount} orders
+                </p>
+              </div>
+              {ordersLoading && orders === null ? (
+                <p className="px-5 py-7 text-sm text-[#747b75]" role="status">
+                  Loading order activity…
+                </p>
+              ) : ordersError && orders === null ? (
+                <p className="px-5 py-7 text-sm text-[#a3423c]" role="alert">
+                  Order activity is unavailable.
+                </p>
+              ) : recentOrderCount === 0 ? (
+                <p className="px-5 py-7 text-sm text-[#747b75]">
+                  No recent orders to summarize.
+                </p>
+              ) : (
+                <ul className="space-y-4 px-5 py-5">
+                  {recentOrderStatuses.map((status) => (
+                    <li key={status.label}>
+                      <div className="mb-1.5 flex items-center justify-between gap-3 text-xs">
+                        <span className="text-[#747b75]">{status.label}</span>
+                        <span className="font-semibold tabular-nums">
+                          {status.count}
+                        </span>
+                      </div>
+                      <div
+                        aria-label={`${status.label}: ${status.count} orders`}
+                        className="h-2 overflow-hidden rounded-full bg-[#f1f3ef]"
+                        role="img"
+                      >
+                        <div
+                          className="h-full rounded-full transition-[width] duration-300"
+                          style={{
+                            width: `${(status.count / recentOrderCount) * 100}%`,
+                            backgroundColor: status.color,
+                          }}
+                        />
+                      </div>
+                    </li>
                   ))}
                 </ul>
               )}

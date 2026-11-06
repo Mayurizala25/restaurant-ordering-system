@@ -35,7 +35,10 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   env: {
-    NEXT_PUBLIC_MENU_ORIGIN: process.env.NEXT_PUBLIC_MENU_ORIGIN ?? "",
+    NEXT_PUBLIC_MENU_ORIGIN:
+      process.env.NODE_ENV === "production"
+        ? (process.env.NEXT_PUBLIC_MENU_ORIGIN ?? "")
+        : "",
     NEXT_PUBLIC_DEV_LAN_HOST: process.env.NODE_ENV === "development" ? devLanHost : "",
   },
   allowedDevOrigins:

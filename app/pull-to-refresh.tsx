@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 
 const REFRESH_THRESHOLD = 72;
 const MAX_PULL_DISTANCE = 88;
+const REFRESH_INDICATOR_DURATION = 900;
+const SOFT_REFRESH_EVENT = "virtual-rudra:refresh";
 
 export default function PullToRefresh({
   children,
@@ -14,6 +16,7 @@ export default function PullToRefresh({
   const pathname = usePathname();
   const rootRef = useRef<HTMLDivElement>(null);
   const pullDistanceRef = useRef(0);
+  const refreshTimerRef = useRef<number | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -86,7 +89,12 @@ export default function PullToRefresh({
     function handleTouchEnd() {
       if (tracking && pullDistanceRef.current >= REFRESH_THRESHOLD) {
         setRefreshing(true);
-        window.setTimeout(() => window.location.reload(), 120);
+        window.dispatchEvent(new Event(SOFT_REFRESH_EVENT));
+        refreshTimerRef.current = window.setTimeout(() => {
+          setRefreshing(false);
+          resetPull();
+          refreshTimerRef.current = null;
+        }, REFRESH_INDICATOR_DURATION);
         return;
       }
       resetPull();
@@ -108,6 +116,15 @@ export default function PullToRefresh({
     };
   }, [pathname, refreshing]);
 
+  useEffect(
+    () => () => {
+      if (refreshTimerRef.current !== null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const isPulling = pullDistance > 0 && !refreshing;
 
   return (
@@ -115,13 +132,12 @@ export default function PullToRefresh({
       {(isPulling || refreshing) && (
         <div
           aria-live="polite"
-          className={`vr-pull-indicator${refreshing ? " is-refreshing" : ""}`}
+          className="vr-pull-indicator"
           role="status"
           style={{
             transform: `translate(-50%, ${refreshing ? 70 : Math.min(pullDistance, 72)}px)`,
           }}
         >
-          <span aria-hidden="true" className="vr-pull-spinner" />
           {refreshing
             ? "Refreshing…"
             : pullDistance >= REFRESH_THRESHOLD

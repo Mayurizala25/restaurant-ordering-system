@@ -1,0 +1,6 @@
+.env*
+.vercel/
+supabase/.temp/
+supabase/migrations/20261001*
+*.zip
+COPILOT.md

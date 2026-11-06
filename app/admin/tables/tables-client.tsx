@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import QRCode from "qrcode";
 import type { DemoTable } from "../_lib/demo-data";
+import { AdminPageHeading } from "../_components/admin-page";
+import {
+  createTimeoutSignal,
+  fetchJsonWithTimeout,
+  RequestTimeoutError,
+} from "../_lib/request-timeout";
 
 type TableForm = {
   tableNumber: string;
@@ -55,6 +61,10 @@ async function readApiResponse(response: Response) {
   } catch {
     throw new Error("The table service returned an unreadable response.");
   }
+  return readApiPayload(response, payload);
+}
+
+function readApiPayload(response: Response, payload: unknown) {
   if (!response.ok) {
     throw new Error(
       isRecord(payload) && typeof payload.error === "string"
@@ -70,6 +80,7 @@ async function readApiResponse(response: Response) {
 
 export default function AdminTablesClient() {
   const [data, setData] = useState<DemoTable[] | null>(null);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -86,12 +97,24 @@ export default function AdminTablesClient() {
   const [isMutating, setIsMutating] = useState(false);
   const [form, setForm] = useState<TableForm>(EMPTY_FORM);
   const requestId = useRef(0);
+  const loadInFlight = useRef(false);
+  const loadController = useRef<AbortController | null>(null);
 
   const refreshData = useCallback(async () => {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
     const currentRequestId = ++requestId.current;
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true);
+    setLoadError("");
     try {
-      const response = await fetch("/api/admin/tables", { cache: "no-store" });
-      const payload = await readApiResponse(response);
+      const { response, payload: responsePayload } = await fetchJsonWithTimeout(
+        "/api/admin/tables",
+        { cache: "no-store", signal: controller.signal },
+        15_000,
+      );
+      const payload = readApiPayload(response, responsePayload);
       if (!Array.isArray(payload.tables) || !payload.tables.every(isTable)) {
         throw new Error("The table service returned invalid table data.");
       }
@@ -101,8 +124,16 @@ export default function AdminTablesClient() {
     } catch (cause) {
       if (currentRequestId !== requestId.current) return;
       setLoadError(
-        cause instanceof Error ? cause.message : "Could not load restaurant tables.",
+        cause instanceof RequestTimeoutError
+          ? "Loading restaurant tables timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not load restaurant tables.",
       );
+    } finally {
+      loadInFlight.current = false;
+      if (loadController.current === controller) loadController.current = null;
+      if (currentRequestId === requestId.current) setLoading(false);
     }
   }, []);
 
@@ -113,12 +144,17 @@ export default function AdminTablesClient() {
       if (document.visibilityState === "visible") void refreshData();
     };
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+    window.addEventListener("virtual-rudra:refresh", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       window.clearTimeout(timer);
       requestId.current += 1;
+      loadController.current?.abort();
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+      window.removeEventListener("virtual-rudra:refresh", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [refreshData]);
@@ -341,6 +377,7 @@ export default function AdminTablesClient() {
     }
     requestId.current += 1;
     setIsMutating(true);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch(
         existing
@@ -356,6 +393,7 @@ export default function AdminTablesClient() {
             seatingCapacity,
             isActive: form.isActive,
           }),
+          signal,
         },
       );
       const payload = await readApiResponse(response);
@@ -379,7 +417,11 @@ export default function AdminTablesClient() {
       );
     } catch (cause) {
       setActionError(
-        cause instanceof Error ? cause.message : "Could not save this table.",
+        signal.aborted
+          ? "Saving the table timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not save this table.",
       );
     } finally {
       setIsMutating(false);
@@ -406,10 +448,11 @@ export default function AdminTablesClient() {
     }
     requestId.current += 1;
     setIsMutating(true);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch(
         `/api/admin/tables?id=${encodeURIComponent(table.id)}`,
-        { method: "DELETE", cache: "no-store" },
+        { method: "DELETE", cache: "no-store", signal },
       );
       await readApiResponse(response);
       setData((current) =>
@@ -420,7 +463,11 @@ export default function AdminTablesClient() {
       setFeedback(`Table ${table.tableNumber} was deleted.`);
     } catch (cause) {
       setActionError(
-        cause instanceof Error ? cause.message : "Could not delete this table.",
+        signal.aborted
+          ? "Deleting the table timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not delete this table.",
       );
     } finally {
       setIsMutating(false);
@@ -428,19 +475,12 @@ export default function AdminTablesClient() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
-      <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="mb-2 text-[10px] font-bold tracking-[0.18em] text-[#f97316]">
-            FLOOR MANAGEMENT
-          </p>
-          <h1 className="text-2xl font-bold tracking-tight text-[#f3f4f6] sm:text-[28px]">
-            Restaurant tables
-          </h1>
-          <p className="mt-2 max-w-xl text-sm leading-6 text-[#9299a6]">
-            Manage your dining spaces, seating, and table availability.
-          </p>
-        </div>
+    <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+      <AdminPageHeading
+        description="Manage your dining spaces, seating, and table availability."
+        eyebrow="FLOOR MANAGEMENT"
+        title="Restaurant tables"
+      >
         <button
           className="inline-flex h-11 items-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(249,115,22,0.16)] transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
           disabled={!data}
@@ -450,7 +490,7 @@ export default function AdminTablesClient() {
           <Icon name="plus" />
           Add table
         </button>
-      </div>
+      </AdminPageHeading>
 
       <section aria-label="Table summary" className="mb-6 grid gap-4 sm:grid-cols-3">
         <SummaryCard
@@ -483,12 +523,26 @@ export default function AdminTablesClient() {
           }`}
           role={loadError || actionError ? "alert" : "status"}
         >
-          {loadError || actionError || feedback}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p>{loadError || actionError || feedback}</p>
+            {loadError && (
+              <button
+                className="text-xs font-semibold text-[#ffad70] hover:underline"
+                onClick={() =>
+                  window.dispatchEvent(new Event("virtual-rudra:refresh"))
+                }
+                type="button"
+              >
+                Try again
+              </button>
+            )}
+          </div>
         </div>
       )}
 
       <section
         aria-label="Restaurant tables"
+        aria-busy={loading}
         className="overflow-hidden rounded-2xl border border-[#2a2e38] bg-[#171a20] shadow-[0_18px_48px_rgba(0,0,0,0.14)]"
       >
         <div className="flex flex-col gap-4 border-b border-[#2a2e38] px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
@@ -499,7 +553,9 @@ export default function AdminTablesClient() {
                 ? `${filteredTables.length} of ${tables.length} ${
                     tables.length === 1 ? "table" : "tables"
                   }`
-                : "Loading saved tables…"}
+                : loadError
+                  ? "Saved table data is unavailable."
+                  : "Loading saved tables…"}
             </p>
           </div>
           <label className="relative block w-full sm:max-w-xs">

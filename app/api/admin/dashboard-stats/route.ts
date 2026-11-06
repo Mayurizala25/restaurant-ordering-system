@@ -51,6 +51,7 @@ function getIndiaDayBounds(now: Date) {
 
 async function getOrderCount(
   configuration: SupabaseConfiguration,
+  signal: AbortSignal,
   filters: Record<string, string> = {},
 ) {
   const url = createOrdersUrl(configuration);
@@ -62,6 +63,7 @@ async function getOrderCount(
   const response = await fetch(url, {
     method: "HEAD",
     cache: "no-store",
+    signal,
     headers: {
       apikey: configuration.serviceRoleKey,
       Prefer: "count=exact",
@@ -79,7 +81,10 @@ async function getOrderCount(
   return total;
 }
 
-async function getRevenue(configuration: SupabaseConfiguration) {
+async function getRevenue(
+  configuration: SupabaseConfiguration,
+  signal: AbortSignal,
+) {
   let offset = 0;
   let totalPaise = 0;
 
@@ -91,6 +96,7 @@ async function getRevenue(configuration: SupabaseConfiguration) {
 
     const response = await fetch(url, {
       cache: "no-store",
+      signal,
       headers: {
         apikey: configuration.serviceRoleKey,
         Accept: "application/json",
@@ -139,11 +145,18 @@ async function getRevenue(configuration: SupabaseConfiguration) {
 
 export async function GET() {
   const cookieStore = await cookies();
-  if (
-    !(await verifyAdminSessionToken(
+  let validSession: boolean;
+  try {
+    validSession = await verifyAdminSessionToken(
       cookieStore.get(ADMIN_SESSION_COOKIE)?.value,
-    ))
-  ) {
+    );
+  } catch {
+    return jsonError(
+      "Admin session verification is temporarily unavailable. Try again.",
+      503,
+    );
+  }
+  if (!validSession) {
     return jsonError("Admin authentication is required.", 401);
   }
 
@@ -167,6 +180,7 @@ export async function GET() {
   }
 
   const { start, end } = getIndiaDayBounds(new Date());
+  const timeoutSignal = AbortSignal.timeout(15_000);
   try {
     const [
       totalOrders,
@@ -175,14 +189,14 @@ export async function GET() {
       completedOrders,
       revenueINR,
     ] = await Promise.all([
-      getOrderCount(configuration),
-      getOrderCount(configuration, {
+      getOrderCount(configuration, timeoutSignal),
+      getOrderCount(configuration, timeoutSignal, {
         created_at: `gte.${start}`,
         and: `(created_at.lt.${end})`,
       }),
-      getOrderCount(configuration, { status: "eq.pending" }),
-      getOrderCount(configuration, { status: "eq.served" }),
-      getRevenue(configuration),
+      getOrderCount(configuration, timeoutSignal, { status: "eq.pending" }),
+      getOrderCount(configuration, timeoutSignal, { status: "eq.served" }),
+      getRevenue(configuration, timeoutSignal),
     ]);
 
     return Response.json(
@@ -196,6 +210,8 @@ export async function GET() {
       { headers: noStoreHeaders },
     );
   } catch {
-    return jsonError("Could not load dashboard statistics from Supabase.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Dashboard statistics request timed out. Try again.", 504)
+      : jsonError("Could not load dashboard statistics from Supabase.", 502);
   }
 }

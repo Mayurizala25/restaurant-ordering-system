@@ -11,6 +11,12 @@ import {
 import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  createTimeoutSignal,
+  fetchJsonWithTimeout,
+  RequestCancelledError,
+  RequestTimeoutError,
+} from "./request-timeout";
 
 type AdminNotification = {
   orderId: string;
@@ -120,6 +126,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [sessionError, setSessionError] = useState("");
+  const [sessionCheckAttempt, setSessionCheckAttempt] = useState(0);
   const [notifications, setNotifications] = useState<AdminNotification[]>([]);
   const [notificationsError, setNotificationsError] = useState("");
   const notificationRestaurantId = useRef<string | null>(null);
@@ -212,21 +220,48 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let requestId = 0;
+    let controller: AbortController | null = null;
     const checkSession = async () => {
+      const currentRequestId = ++requestId;
+      controller?.abort();
+      const currentController = new AbortController();
+      controller = currentController;
+      setLoading(true);
       let validSession = false;
+      let checkError = "";
       try {
-        const response = await fetch("/api/admin/session", {
-          cache: "no-store",
-        });
-        validSession = response.ok;
-      } catch {
-        validSession = false;
+        const { response, payload: result } = await fetchJsonWithTimeout(
+          "/api/admin/session",
+          { cache: "no-store", signal: currentController.signal },
+          15_000,
+        );
+        if (response.status === 401) {
+          validSession = false;
+        } else if (!response.ok) {
+          checkError =
+            isRecord(result) && typeof result.error === "string"
+              ? result.error
+              : "Could not verify the admin session. Try again.";
+        } else {
+          validSession = true;
+        }
+      } catch (cause) {
+        if (!(cause instanceof RequestCancelledError)) {
+          checkError =
+            cause instanceof RequestTimeoutError
+              ? "Admin session verification timed out. Try again."
+              : cause instanceof Error
+                ? cause.message
+                : "Could not verify the admin session. Try again.";
+        }
       }
-      if (!active) return;
+      if (!active || currentRequestId !== requestId) return;
       setAuthenticated(validSession);
+      setSessionError(checkError);
       setLoading(false);
 
-      if (!validSession && pathname !== "/admin/login") {
+      if (!validSession && !checkError && pathname !== "/admin/login") {
         router.replace("/admin/login");
       } else if (validSession && pathname === "/admin/login") {
         router.replace("/admin/dashboard");
@@ -237,10 +272,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("storage", checkSession);
     return () => {
       active = false;
+      requestId += 1;
+      controller?.abort();
       window.clearTimeout(checkTimer);
       window.removeEventListener("storage", checkSession);
     };
-  }, [pathname, router]);
+  }, [pathname, router, sessionCheckAttempt]);
 
   useEffect(() => {
     const handleNotificationStorage = (event: StorageEvent) => {
@@ -273,12 +310,27 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
     syncNotifications,
     setNotificationsRead,
     signOut: async () => {
-      const response = await fetch("/api/admin/session", {
-        method: "DELETE",
-        cache: "no-store",
-      });
+      const signal = createTimeoutSignal(15_000);
+      let response: Response;
+      try {
+        response = await fetch("/api/admin/session", {
+          method: "DELETE",
+          cache: "no-store",
+          signal,
+        });
+      } catch (cause) {
+        throw new Error(
+          signal.aborted
+            ? "Ending the admin session timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not end the admin session.",
+        );
+      }
       if (!response.ok) {
-        throw new Error("Could not end the admin session.");
+        throw new Error(
+          "Could not end the admin session.",
+        );
       }
       setAuthenticated(false);
       router.replace("/admin/login");
@@ -289,6 +341,20 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const content = loading ? (
     <div className="grid min-h-screen place-items-center bg-[#f5f6f2] text-sm text-[#535b55]">
       Checking demo session…
+    </div>
+  ) : sessionError && !isLoginPage ? (
+    <div
+      className="grid min-h-screen place-content-center justify-items-center gap-3 bg-[#f5f6f2] px-5 text-sm text-[#a3423c]"
+      role="alert"
+    >
+      <p>{sessionError}</p>
+      <button
+        className="font-semibold underline"
+        onClick={() => setSessionCheckAttempt((attempt) => attempt + 1)}
+        type="button"
+      >
+        Try again
+      </button>
     </div>
   ) : isLoginPage && !authenticated ? (
     children
@@ -322,6 +388,49 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     setNotificationsRead,
   } = useAdmin();
   const [logoutError, setLogoutError] = useState("");
+  const [theme, setTheme] = useState<"dark" | "light">("light");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileNavOpen]);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const savedTheme = window.localStorage.getItem("vr-admin-theme");
+        if (savedTheme === "light" || savedTheme === "dark") {
+          setTheme(savedTheme);
+        }
+      } catch {
+        setLogoutError("Theme preference could not be loaded from this browser.");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    setLogoutError("");
+    try {
+      window.localStorage.setItem("vr-admin-theme", nextTheme);
+    } catch {
+      setLogoutError("Theme changed, but could not be saved for your next visit.");
+    }
+  }
 
   async function handleSignOut() {
     setLogoutError("");
@@ -335,10 +444,18 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="vr-admin-theme">
+    <div className="vr-admin-theme" data-admin-theme={theme}>
       <div className="vr-admin-workspace">
-        <aside aria-label="Admin sidebar" className="vr-admin-sidebar">
-          <Link className="vr-admin-brand" href="/admin/dashboard">
+        <aside
+          aria-label="Admin sidebar"
+          className={`vr-admin-sidebar${mobileNavOpen ? " is-mobile-open" : ""}`}
+          id="admin-sidebar"
+        >
+          <Link
+            className="vr-admin-brand"
+            href="/admin/dashboard"
+            onClick={() => setMobileNavOpen(false)}
+          >
             <Image
               alt=""
               className="vr-admin-brand-mark"
@@ -361,6 +478,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
                 className={pathname === item.href ? "is-active" : ""}
                 href={item.href}
                 key={item.href}
+                onClick={() => setMobileNavOpen(false)}
                 title={item.label}
               >
                 <AdminNavIcon name={item.icon} />
@@ -371,7 +489,10 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           <button
             aria-label="Sign out"
             className="vr-admin-logout"
-            onClick={() => void handleSignOut()}
+            onClick={() => {
+              setMobileNavOpen(false);
+              void handleSignOut();
+            }}
             title="Sign out"
             type="button"
           >
@@ -379,10 +500,58 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             Sign out
           </button>
         </aside>
+        {mobileNavOpen && (
+          <button
+            aria-label="Close admin navigation"
+            className="vr-admin-mobile-scrim"
+            onClick={() => setMobileNavOpen(false)}
+            type="button"
+          />
+        )}
 
         <div className="vr-admin-main">
           <header className="vr-admin-header">
+            <div className="vr-admin-header-leading">
+              <button
+                aria-controls="admin-sidebar"
+                aria-expanded={mobileNavOpen}
+                aria-label={mobileNavOpen ? "Close admin menu" : "Open admin menu"}
+                className="vr-admin-mobile-menu"
+                onClick={() => setMobileNavOpen((open) => !open)}
+                type="button"
+              >
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                >
+                  {mobileNavOpen ? (
+                    <path d="m6 6 12 12M18 6 6 18" />
+                  ) : (
+                    <path d="M4 7h16M4 12h16M4 17h16" />
+                  )}
+                </svg>
+              </button>
+              <h1 className="vr-admin-header-title">
+                {adminNavigation.find((item) => item.href === pathname)?.label ??
+                  "Restaurant Admin"}
+              </h1>
+            </div>
             <div className="vr-admin-header-actions">
+              <button
+                aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+                className="vr-admin-theme-toggle"
+                onClick={toggleTheme}
+                title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+                type="button"
+              >
+                <AdminNavIcon name={theme === "dark" ? "sun" : "moon"} />
+                <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+              </button>
               <AdminNotificationBell
                 notifications={notifications}
                 notificationsError={notificationsError}
@@ -431,7 +600,9 @@ function AdminNavIcon({
     | "feedback"
     | "analytics"
     | "profile"
-    | "logout";
+    | "logout"
+    | "sun"
+    | "moon";
 }) {
   const paths = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -442,6 +613,8 @@ function AdminNavIcon({
     analytics: <><path d="M4 19V5m0 14h17" /><path d="m7 15 4-4 3 2 6-7" /></>,
     profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7" /></>,
+    sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></>,
+    moon: <><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" /></>,
   };
 
   return (

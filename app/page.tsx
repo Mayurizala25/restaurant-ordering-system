@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import CustomerThemeToggle from "./customer/customer-theme-toggle";
 
 const highlights = [
   {
@@ -21,18 +22,18 @@ const highlights = [
 
 export default function Home() {
   return (
-    <main className="vr-home-page">
+    <main className="vr-home-page" data-customer-theme="light">
       <div className="vr-home-shell">
         <header className="vr-home-header">
           <Link aria-label="Virtual Rudra home" className="vr-home-brand" href="/">
             <Image
               alt=""
               className="vr-home-brand-mark"
-              height={48}
+              height={403}
               priority
               src="/brand/virtual-rudra-logo.png?v=2"
               unoptimized
-              width={64}
+              width={587}
             />
             <span>
               <strong>Virtual Rudra</strong>
@@ -42,6 +43,7 @@ export default function Home() {
           <Link className="vr-home-admin-link" href="/admin/login">
             Admin sign in <span aria-hidden="true">↗</span>
           </Link>
+          <CustomerThemeToggle />
         </header>
 
         <section aria-labelledby="home-title" className="vr-home-hero">
@@ -79,11 +81,11 @@ export default function Home() {
               <Image
                 alt="Virtual Rudra orange chef-hat logo"
                 className="vr-home-hero-logo"
-                height={312}
+                height={403}
                 priority
                 src="/brand/virtual-rudra-logo.png?v=2"
                 unoptimized
-                width={416}
+                width={587}
               />
             </div>
             <div className="vr-home-visual-caption">

@@ -138,9 +138,13 @@ async function isActiveCategory(
 
 export async function GET() {
   const cookieStore = await cookies();
-  if (
-    !(await verifyAdminSessionToken(cookieStore.get(ADMIN_SESSION_COOKIE)?.value))
-  ) {
+  let validSession: boolean;
+  try {
+    validSession = await verifyAdminSessionToken(cookieStore.get(ADMIN_SESSION_COOKIE)?.value);
+  } catch {
+    return jsonError("Admin session verification is temporarily unavailable. Try again.", 503);
+  }
+  if (!validSession) {
     return jsonError("Admin authentication is required.", 401);
   }
 
@@ -162,18 +166,22 @@ export async function GET() {
   );
   itemsUrl.searchParams.set("order", "sort_order.asc,name.asc");
 
+  const timeoutSignal = AbortSignal.timeout(10_000);
   let response: Response;
   try {
     response = await fetch(itemsUrl, {
       method: "GET",
       cache: "no-store",
+      signal: timeoutSignal,
       headers: {
         apikey: configuration.serviceRoleKey,
         Accept: "application/json",
       },
     });
   } catch {
-    return jsonError("Could not load products from Supabase.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Supabase menu item request timed out. Try again.", 504)
+      : jsonError("Could not load products from Supabase.", 502);
   }
   if (!response.ok) {
     return jsonError("Could not load products from Supabase.", 502);
@@ -181,7 +189,9 @@ export async function GET() {
 
   const rows: unknown = await response.json().catch(() => null);
   if (!Array.isArray(rows)) {
-    return jsonError("Supabase returned invalid product data.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Supabase menu item request timed out. Try again.", 504)
+      : jsonError("Supabase returned invalid product data.", 502);
   }
   const items = rows.map(mapMenuItem);
   if (items.some((item) => item === null)) {

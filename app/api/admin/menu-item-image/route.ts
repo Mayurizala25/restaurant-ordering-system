@@ -171,17 +171,20 @@ export async function POST(request: Request) {
   }
   if (!body) return jsonError("Images must be 5 MiB or smaller.", 413);
 
-  let formData: FormData;
+  let file: unknown;
   try {
-    formData = await new Request(request.url, {
+    const formData = await new Request(request.url, {
       method: "POST",
       headers: request.headers,
       body,
     }).formData();
+    if (!("get" in formData) || typeof formData.get !== "function") {
+      return jsonError("The uploaded image form could not be read.", 400);
+    }
+    file = formData.get("image");
   } catch {
     return jsonError("The uploaded image form could not be read.", 400);
   }
-  const file = formData.get("image");
   if (
     typeof File === "undefined" ||
     !(file instanceof File) ||

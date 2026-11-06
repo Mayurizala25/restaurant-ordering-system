@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DemoCategory, DemoData, DemoMenuItem } from "../_lib/demo-data";
 import { loadDemoData, saveDemoData } from "../_lib/demo-storage";
 import { SignOutButton } from "../_lib/admin-provider";
+import { AdminPageHeading } from "../_components/admin-page";
+import {
+  createTimeoutSignal,
+  fetchJsonWithTimeout,
+  RequestCancelledError,
+  RequestTimeoutError,
+} from "../_lib/request-timeout";
 
 type ItemForm = {
   name: string;
@@ -92,6 +99,7 @@ function isDemoCategory(value: unknown): value is DemoCategory {
 
 export default function AdminMenuItemsClient() {
   const [data, setData] = useState<DemoData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [actionError, setActionError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -103,8 +111,16 @@ export default function AdminMenuItemsClient() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [processingItemId, setProcessingItemId] = useState<string | null>(null);
+  const loadInFlight = useRef(false);
+  const loadController = useRef<AbortController | null>(null);
 
   async function refreshData() {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true);
+    setLoadError("");
     try {
       let localData = emptyDemoData;
       try {
@@ -112,21 +128,21 @@ export default function AdminMenuItemsClient() {
       } catch {
         localData = emptyDemoData;
       }
-      const [itemsResponse, categoriesResponse] = await Promise.all([
-        fetch("/api/menu-items", { cache: "no-store" }),
-        fetch("/api/categories", { cache: "no-store" }),
+      const [
+        { response: itemsResponse, payload: itemsPayload },
+        { response: categoriesResponse, payload: categoriesPayload },
+      ] = await Promise.all([
+        fetchJsonWithTimeout(
+          "/api/menu-items",
+          { cache: "no-store", signal: controller.signal },
+          15_000,
+        ),
+        fetchJsonWithTimeout(
+          "/api/categories",
+          { cache: "no-store", signal: controller.signal },
+          15_000,
+        ),
       ]);
-      let itemsPayload: unknown;
-      let categoriesPayload: unknown;
-      try {
-        [itemsPayload, categoriesPayload] = await Promise.all([
-          itemsResponse.json(),
-          categoriesResponse.json(),
-        ]);
-      } catch {
-        itemsPayload = null;
-        categoriesPayload = null;
-      }
       if (!itemsResponse.ok) {
         throw new Error(
           isRecord(itemsPayload) && typeof itemsPayload.error === "string"
@@ -162,10 +178,19 @@ export default function AdminMenuItemsClient() {
       });
       setLoadError("");
     } catch (cause) {
-      setData(null);
-      setLoadError(
-        cause instanceof Error ? cause.message : "Could not load products from Supabase.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setLoadError(
+          cause instanceof RequestTimeoutError
+            ? "Loading menu items timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load products from Supabase.",
+        );
+      }
+    } finally {
+      loadInFlight.current = false;
+      if (loadController.current === controller) loadController.current = null;
+      setLoading(false);
     }
   }
 
@@ -183,6 +208,8 @@ export default function AdminMenuItemsClient() {
     window.addEventListener("storage", handleStorage);
     const handleFocus = () => void refreshData();
     window.addEventListener("focus", handleFocus);
+    window.addEventListener("pageshow", handleFocus);
+    window.addEventListener("virtual-rudra:refresh", handleFocus);
     document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
@@ -190,7 +217,10 @@ export default function AdminMenuItemsClient() {
       window.clearTimeout(timer);
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("pageshow", handleFocus);
+      window.removeEventListener("virtual-rudra:refresh", handleFocus);
       document.removeEventListener("visibilitychange", handleVisibility);
+      loadController.current?.abort();
     };
   }, []);
 
@@ -290,6 +320,7 @@ export default function AdminMenuItemsClient() {
     }
 
     setIsUploadingImage(true);
+    const signal = createTimeoutSignal(30_000);
     try {
       const body = new FormData();
       body.set("image", file);
@@ -297,6 +328,7 @@ export default function AdminMenuItemsClient() {
         method: "POST",
         body,
         cache: "no-store",
+        signal,
       });
       let payload: unknown;
       try {
@@ -319,7 +351,11 @@ export default function AdminMenuItemsClient() {
       setFeedback("Image uploaded. Save the menu item to apply it.");
     } catch (cause) {
       setActionError(
-        cause instanceof Error ? cause.message : "Could not upload the menu item image.",
+        signal.aborted
+          ? "Uploading the menu item image timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not upload the menu item image.",
       );
     } finally {
       setIsUploadingImage(false);
@@ -388,6 +424,7 @@ export default function AdminMenuItemsClient() {
 
     setIsSaving(true);
     const existing = items.find((item) => item.id === editingId);
+    const signal = createTimeoutSignal(20_000);
     try {
       let updatedItem: DemoMenuItem;
       if (existing) {
@@ -405,6 +442,7 @@ export default function AdminMenuItemsClient() {
             sortOrder: items.indexOf(existing),
           }),
           cache: "no-store",
+          signal,
         });
         let payload: unknown;
         try {
@@ -458,6 +496,7 @@ export default function AdminMenuItemsClient() {
             sortOrder: items.length,
           }),
           cache: "no-store",
+          signal,
         });
         let payload: unknown;
         try {
@@ -520,7 +559,13 @@ export default function AdminMenuItemsClient() {
           (existing ? `"${name}" was updated.` : `"${name}" was added to the menu.`),
       );
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Could not save this menu item.");
+      setActionError(
+        signal.aborted
+          ? "Saving the menu item timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not save this menu item.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -534,10 +579,11 @@ export default function AdminMenuItemsClient() {
       return;
     }
     setProcessingItemId(item.id);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch(
         `/api/menu-items?id=${encodeURIComponent(item.id)}`,
-        { method: "DELETE", cache: "no-store" },
+        { method: "DELETE", cache: "no-store", signal },
       );
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -564,7 +610,13 @@ export default function AdminMenuItemsClient() {
       }
       setFeedback(`"${item.name}" was deleted.`);
     } catch (cause) {
-      setActionError(cause instanceof Error ? cause.message : "Could not delete this product.");
+      setActionError(
+        signal.aborted
+          ? "Deleting the menu item timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not delete this product.",
+      );
     } finally {
       setProcessingItemId(null);
     }
@@ -576,12 +628,14 @@ export default function AdminMenuItemsClient() {
     if (!data) return;
     const isAvailable = !item.isAvailable;
     setProcessingItemId(item.id);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch("/api/menu-items", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId: item.id, isAvailable }),
         cache: "no-store",
+        signal,
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -619,7 +673,11 @@ export default function AdminMenuItemsClient() {
       setFeedback(`"${item.name}" is now ${isAvailable ? "available" : "unavailable"}.`);
     } catch (cause) {
       setActionError(
-        cause instanceof Error ? cause.message : "Could not update item availability.",
+        signal.aborted
+          ? "Updating menu item availability timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not update item availability.",
       );
     } finally {
       setProcessingItemId(null);
@@ -649,13 +707,12 @@ export default function AdminMenuItemsClient() {
           </nav>
         </header>
 
-        <main className="mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
-          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="mb-1 text-[10px] font-bold tracking-[0.16em] text-[#f97316]">MENU MANAGEMENT</p>
-              <h1 className="text-2xl font-bold tracking-tight sm:text-[27px]">Menu items</h1>
-              <p className="mt-1 text-sm text-[#9299a6]">A clear view of your dishes, categories, pricing, and availability.</p>
-            </div>
+        <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+          <AdminPageHeading
+            description="A clear view of your dishes, categories, pricing, and availability."
+            eyebrow="MENU MANAGEMENT"
+            title="Menu items"
+          >
             <button
               className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(249,115,22,0.16)] transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!data || categories.length === 0}
@@ -665,7 +722,7 @@ export default function AdminMenuItemsClient() {
               <Icon name="plus" />
               Add item
             </button>
-          </div>
+          </AdminPageHeading>
 
           {(loadError || actionError || feedback) && (
             <div
@@ -693,7 +750,10 @@ export default function AdminMenuItemsClient() {
             </div>
           )}
 
-          <section className="overflow-hidden rounded-2xl border border-[#2a2e38] bg-[#171a20] shadow-[0_18px_48px_rgba(0,0,0,0.14)]">
+          <section
+            aria-busy={loading}
+            className="overflow-hidden rounded-2xl border border-[#2a2e38] bg-[#171a20] shadow-[0_18px_48px_rgba(0,0,0,0.14)]"
+          >
             <div className="flex flex-col gap-4 border-b border-[#2a2e38] px-5 py-5 sm:px-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
@@ -759,7 +819,9 @@ export default function AdminMenuItemsClient() {
 
             {!data ? (
               <p className="px-6 py-10 text-center text-sm text-[#747b75]">
-                {loadError ? "Menu data could not be loaded." : "Loading menu items…"}
+                {loading
+                  ? "Loading menu items…"
+                  : loadError || "Menu data could not be loaded."}
               </p>
             ) : filteredItems.length ? (
               <div className="divide-y divide-[#2a2e38]">

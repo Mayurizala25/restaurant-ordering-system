@@ -140,11 +140,7 @@ export async function verifyAdminSessionToken(
 ): Promise<boolean> {
   if (!token || getTokenExpiration(token) === null) return false;
   const tokenHash = createHash("sha256").update(token).digest("hex");
-  try {
-    return !(await isAdminSessionRevoked(tokenHash));
-  } catch {
-    return false;
-  }
+  return !(await isAdminSessionRevoked(tokenHash));
 }
 
 export async function revokeAdminSessionToken(

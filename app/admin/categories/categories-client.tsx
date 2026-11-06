@@ -1,10 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DemoCategory, DemoData } from "../_lib/demo-data";
 import { loadDemoData, saveDemoData } from "../_lib/demo-storage";
 import { SignOutButton } from "../_lib/admin-provider";
+import { AdminPageHeading } from "../_components/admin-page";
+import {
+  createTimeoutSignal,
+  fetchJsonWithTimeout,
+  RequestCancelledError,
+  RequestTimeoutError,
+} from "../_lib/request-timeout";
 
 type CategoryForm = {
   name: string;
@@ -64,6 +71,7 @@ function isDemoMenuItem(value: unknown): value is DemoData["menuItems"][number] 
 
 export default function AdminCategoriesClient() {
   const [data, setData] = useState<DemoData | null>(null);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -73,8 +81,16 @@ export default function AdminCategoriesClient() {
   const [form, setForm] = useState<CategoryForm>(blankForm);
   const [isSaving, setIsSaving] = useState(false);
   const [processingCategoryId, setProcessingCategoryId] = useState<string | null>(null);
+  const loadInFlight = useRef(false);
+  const loadController = useRef<AbortController | null>(null);
 
   async function refreshData() {
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
+    const controller = new AbortController();
+    loadController.current = controller;
+    setLoading(true);
+    setLoadError("");
     try {
       let localData = emptyDemoData;
       try {
@@ -82,21 +98,21 @@ export default function AdminCategoriesClient() {
       } catch {
         localData = emptyDemoData;
       }
-      const [categoriesResponse, itemsResponse] = await Promise.all([
-        fetch("/api/categories", { cache: "no-store" }),
-        fetch("/api/menu-items", { cache: "no-store" }),
+      const [
+        { response: categoriesResponse, payload: categoriesPayload },
+        { response: itemsResponse, payload: itemsPayload },
+      ] = await Promise.all([
+        fetchJsonWithTimeout(
+          "/api/categories",
+          { cache: "no-store", signal: controller.signal },
+          15_000,
+        ),
+        fetchJsonWithTimeout(
+          "/api/menu-items",
+          { cache: "no-store", signal: controller.signal },
+          15_000,
+        ),
       ]);
-      let categoriesPayload: unknown;
-      let itemsPayload: unknown;
-      try {
-        [categoriesPayload, itemsPayload] = await Promise.all([
-          categoriesResponse.json(),
-          itemsResponse.json(),
-        ]);
-      } catch {
-        categoriesPayload = null;
-        itemsPayload = null;
-      }
       if (!categoriesResponse.ok) {
         throw new Error(
           isRecord(categoriesPayload) && typeof categoriesPayload.error === "string"
@@ -132,16 +148,40 @@ export default function AdminCategoriesClient() {
       });
       setLoadError("");
     } catch (cause) {
-      setData(null);
-      setLoadError(
-        cause instanceof Error ? cause.message : "Could not load categories from Supabase.",
-      );
+      if (!(cause instanceof RequestCancelledError)) {
+        setLoadError(
+          cause instanceof RequestTimeoutError
+            ? "Loading categories timed out. Try again."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not load categories from Supabase.",
+        );
+      }
+    } finally {
+      loadInFlight.current = false;
+      if (loadController.current === controller) loadController.current = null;
+      setLoading(false);
     }
   }
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refreshData(), 0);
-    return () => window.clearTimeout(timer);
+    const handleRefresh = () => void refreshData();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refreshData();
+    };
+    window.addEventListener("focus", handleRefresh);
+    window.addEventListener("pageshow", handleRefresh);
+    window.addEventListener("virtual-rudra:refresh", handleRefresh);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.clearTimeout(timer);
+      window.removeEventListener("focus", handleRefresh);
+      window.removeEventListener("pageshow", handleRefresh);
+      window.removeEventListener("virtual-rudra:refresh", handleRefresh);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      loadController.current?.abort();
+    };
   }, []);
 
   const categories = data?.categories ?? emptyCategories;
@@ -235,6 +275,7 @@ export default function AdminCategoriesClient() {
 
     const existing = categories.find((category) => category.id === editingId);
     setIsSaving(true);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch("/api/categories", {
         method: existing ? "PATCH" : "POST",
@@ -248,6 +289,7 @@ export default function AdminCategoriesClient() {
           isActive: form.isActive,
         }),
         cache: "no-store",
+        signal,
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -280,7 +322,11 @@ export default function AdminCategoriesClient() {
       setFeedback(cacheError || (existing ? `"${name}" was updated.` : `"${name}" was added.`));
     } catch (cause) {
       setSaveError(
-        cause instanceof Error ? cause.message : "Could not save this category to Supabase.",
+        signal.aborted
+          ? "Saving the category timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not save this category to Supabase.",
       );
     } finally {
       setIsSaving(false);
@@ -296,10 +342,11 @@ export default function AdminCategoriesClient() {
     }
 
     setProcessingCategoryId(category.id);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch(
         `/api/categories?id=${encodeURIComponent(category.id)}`,
-        { method: "DELETE", cache: "no-store" },
+        { method: "DELETE", cache: "no-store", signal },
       );
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -323,7 +370,11 @@ export default function AdminCategoriesClient() {
       setFeedback(cacheError || `"${category.name}" was deleted.`);
     } catch (cause) {
       setSaveError(
-        cause instanceof Error ? cause.message : "Could not delete this category from Supabase.",
+        signal.aborted
+          ? "Deleting the category timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not delete this category from Supabase.",
       );
     } finally {
       setProcessingCategoryId(null);
@@ -336,6 +387,7 @@ export default function AdminCategoriesClient() {
     if (!data) return;
     const isActive = !category.isActive;
     setProcessingCategoryId(category.id);
+    const signal = createTimeoutSignal(20_000);
     try {
       const response = await fetch("/api/categories", {
         method: "PATCH",
@@ -349,6 +401,7 @@ export default function AdminCategoriesClient() {
           isActive,
         }),
         cache: "no-store",
+        signal,
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
@@ -378,7 +431,11 @@ export default function AdminCategoriesClient() {
       setFeedback(cacheError || `"${category.name}" is now ${isActive ? "active" : "inactive"}.`);
     } catch (cause) {
       setSaveError(
-        cause instanceof Error ? cause.message : "Could not update category status in Supabase.",
+        signal.aborted
+          ? "Updating category status timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not update category status in Supabase.",
       );
     } finally {
       setProcessingCategoryId(null);
@@ -410,17 +467,12 @@ export default function AdminCategoriesClient() {
           </nav>
         </header>
 
-        <main className="mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
-          <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <p className="mb-1 text-[10px] font-bold tracking-[0.16em] text-[#185c43]">
-                MENU MANAGEMENT
-              </p>
-              <h1 className="text-2xl font-bold tracking-tight sm:text-[27px]">Menu categories</h1>
-              <p className="mt-1 text-sm text-[#747b75]">
-                Organize the menu and control which categories are visible.
-              </p>
-            </div>
+        <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+          <AdminPageHeading
+            description="Organize the menu and control which categories are visible."
+            eyebrow="MENU MANAGEMENT"
+            title="Menu categories"
+          >
             <button
               className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#185c43] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#124b36] disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!data || isSaving || processingCategoryId !== null}
@@ -430,7 +482,7 @@ export default function AdminCategoriesClient() {
               <Icon name="plus" />
               Add category
             </button>
-          </div>
+          </AdminPageHeading>
 
           {(loadError || saveError || feedback) && (
             <div
@@ -443,10 +495,23 @@ export default function AdminCategoriesClient() {
               role={loadError || saveError ? "alert" : "status"}
             >
               {loadError || saveError || feedback}
+              {loadError && (
+                <button
+                  className="ml-3 font-semibold underline"
+                  disabled={loading}
+                  onClick={() => void refreshData()}
+                  type="button"
+                >
+                  Try again
+                </button>
+              )}
             </div>
           )}
 
-          <section className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]">
+          <section
+            aria-busy={loading}
+            className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+          >
             <div className="flex flex-col gap-4 border-b border-[#e5e8e2] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
               <div>
                 <h2 className="font-bold">All categories</h2>
@@ -471,7 +536,9 @@ export default function AdminCategoriesClient() {
 
             {!data ? (
               <p className="px-6 py-10 text-center text-sm text-[#747b75]">
-                {loadError ? "Category data could not be loaded." : "Loading categories…"}
+                {loading
+                  ? "Loading categories…"
+                  : loadError || "Category data could not be loaded."}
               </p>
             ) : filteredCategories.length > 0 ? (
               <div className="overflow-x-auto">

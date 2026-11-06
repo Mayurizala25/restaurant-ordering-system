@@ -1,9 +1,49 @@
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const noStoreHeaders = { "Cache-Control": "no-store" };
+type MenuResource = "categories" | "items" | "tables";
 
 function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status, headers: noStoreHeaders });
+}
+
+function getFetchFailureType(error: unknown): "timeout" | "network" | "unknown" {
+  if (!(error instanceof Error)) return "unknown";
+  if (error.name === "AbortError" || error.name === "TimeoutError") {
+    return "timeout";
+  }
+  return error.name === "TypeError" ? "network" : "unknown";
+}
+
+async function fetchMenuResource(
+  resource: MenuResource,
+  url: URL,
+  headers: HeadersInit,
+  signal: AbortSignal,
+): Promise<Response> {
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers,
+      signal,
+    });
+    console.info("Supabase menu read completed", {
+      resource,
+      durationMs: Date.now() - startedAt,
+      status: response.status,
+    });
+    return response;
+  } catch (error) {
+    console.error("Supabase menu read failed", {
+      resource,
+      stage: "fetch",
+      durationMs: Date.now() - startedAt,
+      failureType: getFetchFailureType(error),
+    });
+    throw error;
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -71,28 +111,57 @@ export async function GET() {
   let categoriesResponse: Response;
   let itemsResponse: Response;
   let tablesResponse: Response;
+  const signal = AbortSignal.timeout(15_000);
   try {
     [categoriesResponse, itemsResponse, tablesResponse] = await Promise.all([
-      fetch(categoriesUrl, { method: "GET", cache: "no-store", headers }),
-      fetch(itemsUrl, { method: "GET", cache: "no-store", headers }),
-      fetch(tablesUrl, { method: "GET", cache: "no-store", headers }),
+      fetchMenuResource("categories", categoriesUrl, headers, signal),
+      fetchMenuResource("items", itemsUrl, headers, signal),
+      fetchMenuResource("tables", tablesUrl, headers, signal),
     ]);
   } catch {
     return jsonError("Could not load the restaurant menu.", 502);
   }
   if (!categoriesResponse.ok || !itemsResponse.ok || !tablesResponse.ok) {
+    for (const [resource, response] of [
+      ["categories", categoriesResponse],
+      ["items", itemsResponse],
+      ["tables", tablesResponse],
+    ] as const) {
+      if (!response.ok) {
+        console.error("Supabase menu read returned a non-success status", {
+          resource,
+          status: response.status,
+        });
+      }
+    }
     return jsonError("Could not load the restaurant menu.", 502);
   }
 
   let categories: unknown;
   let items: unknown;
   let tables: unknown;
+  const menuResponses: [MenuResource, Response][] = [
+    ["categories", categoriesResponse],
+    ["items", itemsResponse],
+    ["tables", tablesResponse],
+  ];
   try {
-    [categories, items, tables] = await Promise.all([
-      categoriesResponse.json(),
-      itemsResponse.json(),
-      tablesResponse.json(),
-    ]);
+    [categories, items, tables] = await Promise.all(
+      menuResponses.map(async ([resource, response]) => {
+        const startedAt = Date.now();
+        try {
+          return await response.json();
+        } catch (error) {
+          console.error("Supabase menu response could not be read", {
+            resource,
+            stage: "body",
+            durationMs: Date.now() - startedAt,
+            failureType: "response_read",
+          });
+          throw error;
+        }
+      }),
+    );
   } catch {
     return jsonError("The restaurant menu response could not be read.", 502);
   }

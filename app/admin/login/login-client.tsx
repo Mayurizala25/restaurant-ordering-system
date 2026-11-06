@@ -2,13 +2,44 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  fetchJsonWithTimeout,
+  RequestTimeoutError,
+} from "../_lib/request-timeout";
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("light");
+  const [themeError, setThemeError] = useState("");
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const savedTheme = window.localStorage.getItem("vr-admin-theme");
+        if (savedTheme === "light" || savedTheme === "dark") {
+          setTheme(savedTheme);
+        }
+      } catch {
+        setThemeError("Theme preference could not be loaded from this browser.");
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  function toggleTheme() {
+    const nextTheme = theme === "dark" ? "light" : "dark";
+    setTheme(nextTheme);
+    setThemeError("");
+    try {
+      window.localStorage.setItem("vr-admin-theme", nextTheme);
+    } catch {
+      setThemeError("Theme changed, but could not be saved for your next visit.");
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -31,15 +62,18 @@ export default function AdminLoginPage() {
     }
     setIsSubmitting(true);
     try {
-      const response = await fetch("/api/admin/session", {
+      const { response, payload: result } = await fetchJsonWithTimeout(
+        "/api/admin/session",
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
         cache: "no-store",
-      });
+        },
+        15_000,
+      );
       if (!response.ok) {
         let errorMessage = "Could not sign in. Check your credentials and try again.";
-        const result: unknown = await response.json().catch(() => null);
         if (
           typeof result === "object" &&
           result !== null &&
@@ -52,15 +86,24 @@ export default function AdminLoginPage() {
         return;
       }
       router.replace("/admin/dashboard");
-    } catch {
-      setNotice("Could not reach admin sign-in. Try again.");
+    } catch (cause) {
+      setNotice(
+        cause instanceof RequestTimeoutError
+          ? "Admin sign-in timed out. Try again."
+          : cause instanceof Error
+            ? cause.message
+            : "Could not reach admin sign-in. Try again.",
+      );
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <main className="vr-admin-login grid min-h-[100svh] bg-[#f5f6f2] text-[#202521] md:grid-cols-[minmax(0,1.05fr)_minmax(0,.95fr)]">
+    <main
+      className="vr-admin-login grid min-h-[100svh] bg-[#f5f6f2] text-[#202521] md:grid-cols-[minmax(0,1.05fr)_minmax(0,.95fr)]"
+      data-admin-theme={theme}
+    >
       <section className="relative hidden min-h-screen flex-col justify-between overflow-hidden bg-[#174b39] px-12 py-10 text-white md:flex lg:px-16 xl:px-20">
         <div className="relative z-10 flex items-center gap-3 font-semibold">
           <Image
@@ -104,7 +147,34 @@ export default function AdminLoginPage() {
         />
       </section>
 
-      <section className="flex min-h-[100svh] items-center justify-center px-5 py-8 sm:px-8 sm:py-12 lg:px-12">
+      <section className="relative flex min-h-[100svh] items-center justify-center px-5 py-8 sm:px-8 sm:py-12 lg:px-12">
+        <button
+          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          className="vr-admin-login-theme-toggle absolute right-5 top-5 inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition"
+          onClick={toggleTheme}
+          type="button"
+        >
+          <svg
+            aria-hidden="true"
+            className="size-4"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+          >
+            {theme === "dark" ? (
+              <>
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+              </>
+            ) : (
+              <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
+            )}
+          </svg>
+          {theme === "dark" ? "Light mode" : "Dark mode"}
+        </button>
         <div className="w-full max-w-[440px]">
           <div className="mb-8 flex items-center gap-3 font-semibold md:hidden">
             <Image
@@ -119,7 +189,7 @@ export default function AdminLoginPage() {
             <span>Virtual Rudra</span>
           </div>
 
-          <div className="rounded-2xl border border-[#2a2e38] bg-[#15181e] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.28)] sm:p-8">
+          <div className="vr-admin-login-card rounded-2xl border border-[#2a2e38] bg-[#15181e] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.28)] sm:p-8">
             <div className="mb-8">
               <p className="mb-2 text-xs font-bold tracking-[0.16em] text-[#185c43]">
                 ADMIN PORTAL
@@ -192,12 +262,6 @@ export default function AdminLoginPage() {
                 disabled={isSubmitting}
                 type="submit"
               >
-                {isSubmitting && (
-                  <span
-                    aria-hidden="true"
-                    className="size-4 animate-spin rounded-full border-2 border-white/35 border-t-white"
-                  />
-                )}
                 {isSubmitting ? "Signing in…" : "Sign in"}
               </button>
               {notice && (
@@ -215,6 +279,11 @@ export default function AdminLoginPage() {
             <p className="mt-7 text-center text-xs text-[#747b75]">
               Protected admin access
             </p>
+            {themeError && (
+              <p className="mt-3 text-center text-xs text-[#a3423c]" role="alert">
+                {themeError}
+              </p>
+            )}
           </div>
         </div>
       </section>

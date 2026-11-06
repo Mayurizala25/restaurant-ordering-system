@@ -44,11 +44,18 @@ function mapFeedback(value: unknown) {
 
 export async function GET() {
   const cookieStore = await cookies();
-  if (
-    !(await verifyAdminSessionToken(
+  let validSession: boolean;
+  try {
+    validSession = await verifyAdminSessionToken(
       cookieStore.get(ADMIN_SESSION_COOKIE)?.value,
-    ))
-  ) {
+    );
+  } catch {
+    return jsonError(
+      "Admin session verification is temporarily unavailable. Try again.",
+      503,
+    );
+  }
+  if (!validSession) {
     return jsonError("Admin authentication is required.", 401);
   }
 
@@ -86,13 +93,17 @@ export async function GET() {
   url.searchParams.set("limit", "100");
 
   let response: Response;
+  const timeoutSignal = AbortSignal.timeout(10_000);
   try {
     response = await fetch(url, {
       cache: "no-store",
+      signal: timeoutSignal,
       headers: { apikey: serviceRoleKey, Accept: "application/json" },
     });
   } catch {
-    return jsonError("Could not load restaurant feedback.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Loading restaurant feedback timed out. Try again.", 504)
+      : jsonError("Could not load restaurant feedback.", 502);
   }
   if (!response.ok) return jsonError("Could not load restaurant feedback.", 502);
 
@@ -100,7 +111,9 @@ export async function GET() {
   try {
     rows = await response.json();
   } catch {
-    return jsonError("Feedback data could not be read.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Loading restaurant feedback timed out. Try again.", 504)
+      : jsonError("Feedback data could not be read.", 502);
   }
   if (!Array.isArray(rows)) {
     return jsonError("Feedback data is invalid.", 502);

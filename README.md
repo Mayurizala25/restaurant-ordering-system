@@ -37,7 +37,19 @@ A restaurant ordering and administration app built with Next.js, TypeScript, Tai
    npm run dev
    ```
 
-   Open `http://localhost:3000`. Sign in at `/admin/login` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+   Open `http://localhost:3000`. The admin login is available directly at `/admin/login`; sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
+
+## Expo Go
+
+The separate `mobile/` Expo app opens this existing website in a WebView, with a native QR scanner that opens valid table menu codes in the app. Menu, ordering, and tracking continue to use the existing website and Supabase APIs; the Next.js website remains unchanged. From the repository root, run:
+
+```sh
+cd mobile
+npm install
+npm run start
+```
+
+The Next.js website uses port `3000`; Expo Go and Expo Web use port `8082` through the provided mobile scripts. The Expo scripts use LAN mode so the QR code advertises the computer's detected LAN address. Open Expo Go on your phone and scan its QR code. The native app loads the hosted website by default. To test the local website on a phone, set `EXPO_PUBLIC_WEB_URL` to a LAN-reachable URL such as `http://192.168.1.10:3000` before starting Expo; `localhost` on the phone will not reach your computer. If your network blocks LAN connections, use the Expo tunnel script on port `8082`. To open the existing website in Expo Web, run `npm run web` from `mobile/`; Expo Web hands off to the Next.js admin login on port `3000`, using the same host you used to open Expo Web, and shows a sign-in link during handoff. It does not embed a second copy of the admin UI. If the Next.js site uses a different host (including for a web export), set `EXPO_PUBLIC_WEB_URL` to its reachable origin before starting or exporting.
 
 The Supabase migrations enable row-level security and revoke direct public/authenticated access to application data. Server routes use the service-role key and explicitly scope reads and writes to `SUPABASE_RESTAURANT_ID`. This configuration serves **one restaurant per app deployment**; it is not a multi-restaurant admin account or tenant selector.
 
@@ -78,6 +90,8 @@ Keep the generated value private and put it only in your local environment or ho
 Order creation and QR scan recording are public customer operations; their APIs validate submitted data and derive tenant scope from server configuration. Order tracking and feedback submission require an order's private tracking token. Admin data APIs verify the admin session and scope Supabase operations to the configured restaurant.
 
 For table QR codes to work on other devices, the app must be served from a publicly reachable HTTPS origin and `NEXT_PUBLIC_MENU_ORIGIN` must be set to that origin before building. Localhost QR codes only work on the device running the app; a LAN origin requires the phone and server to share a network.
+
+Development builds ignore `NEXT_PUBLIC_MENU_ORIGIN` so local QR codes cannot accidentally point to the production site. They use the development app origin and, when opened on localhost, the detected `NEXT_PUBLIC_DEV_LAN_HOST`.
 
 ## Validation
 

@@ -191,7 +191,15 @@ function createProfileUrl(
 }
 
 export async function GET() {
-  const authorizationError = await authorize();
+  let authorizationError: Response | null;
+  try {
+    authorizationError = await authorize();
+  } catch {
+    return jsonError(
+      "Admin session verification is temporarily unavailable. Try again.",
+      503,
+    );
+  }
   if (authorizationError) return authorizationError;
 
   const configuration = getConfiguration();
@@ -202,16 +210,20 @@ export async function GET() {
   url.searchParams.set("select", PROFILE_COLUMNS);
 
   let response: Response;
+  const timeoutSignal = AbortSignal.timeout(10_000);
   try {
     response = await fetch(url, {
       cache: "no-store",
+      signal: timeoutSignal,
       headers: {
         apikey: configuration.serviceRoleKey,
         Accept: "application/json",
       },
     });
   } catch {
-    return jsonError("Could not load the restaurant profile.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Loading the restaurant profile timed out. Try again.", 504)
+      : jsonError("Could not load the restaurant profile.", 502);
   }
   if (!response.ok) {
     return jsonError("Could not load the restaurant profile.", 502);
@@ -221,7 +233,9 @@ export async function GET() {
   try {
     rows = await response.json();
   } catch {
-    return jsonError("Restaurant profile data could not be read.", 502);
+    return timeoutSignal.aborted
+      ? jsonError("Loading the restaurant profile timed out. Try again.", 504)
+      : jsonError("Restaurant profile data could not be read.", 502);
   }
   if (!Array.isArray(rows) || rows.length !== 1) {
     return jsonError("The configured restaurant was not found.", 404);
