@@ -707,7 +707,7 @@ export default function AdminMenuItemsClient() {
           </nav>
         </header>
 
-        <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+        <main className="vr-admin-menu-items-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
           <AdminPageHeading
             description="A clear view of your dishes, categories, pricing, and availability."
             eyebrow="MENU MANAGEMENT"
@@ -934,7 +934,7 @@ function MenuItemCard({
   onToggleAvailability: (item: DemoMenuItem) => void;
 }) {
   return (
-    <article className="flex flex-col gap-4 border-b border-[#2a2e38] p-4 last:border-b-0 hover:bg-[#20242c]/60 sm:flex-row sm:items-center sm:p-5">
+    <article className="vr-admin-menu-item-card flex flex-col gap-4 border-b border-[#2a2e38] p-4 last:border-b-0 hover:bg-[#20242c]/60 sm:flex-row sm:items-center sm:p-5">
       <ItemImage item={item} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">

@@ -475,7 +475,7 @@ export default function AdminTablesClient() {
   }
 
   return (
-    <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+    <main className="vr-admin-tables-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
       <AdminPageHeading
         description="Manage your dining spaces, seating, and table availability."
         eyebrow="FLOOR MANAGEMENT"
@@ -492,7 +492,7 @@ export default function AdminTablesClient() {
         </button>
       </AdminPageHeading>
 
-      <section aria-label="Table summary" className="mb-6 grid gap-4 sm:grid-cols-3">
+      <section aria-label="Table summary" className="vr-admin-table-summary mb-6 grid gap-4 sm:grid-cols-3">
         <SummaryCard
           label="Total tables"
           value={data ? String(tables.length).padStart(2, "0") : "—"}
@@ -581,7 +581,7 @@ export default function AdminTablesClient() {
           <div className="grid gap-4 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-3">
             {filteredTables.map((table) => (
               <article
-                className="rounded-xl border border-[#30343d] bg-[#1c2027] p-5 transition hover:border-[#484d58]"
+                className="vr-admin-table-card rounded-xl border border-[#30343d] bg-[#1c2027] p-5 transition hover:border-[#484d58]"
                 key={table.id}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -607,7 +607,7 @@ export default function AdminTablesClient() {
                   </span>
                 </div>
 
-                <div className="mt-5 flex justify-end gap-2">
+                <div className="vr-admin-table-actions mt-5 flex justify-end gap-2">
                   <button
                     aria-label={`Show QR code for table ${table.tableNumber}`}
                     className="inline-flex h-9 items-center gap-2 rounded-lg border border-[#493021] bg-[#2c211b] px-3 text-xs font-medium text-[#ff9a4d] transition hover:border-[#f97316] hover:bg-[#38261b]"

@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -340,7 +339,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
   const isLoginPage = pathname === "/admin/login";
   const content = loading ? (
     <div className="grid min-h-screen place-items-center bg-[#f5f6f2] text-sm text-[#535b55]">
-      Checking demo session…
+      Checking admin session…
     </div>
   ) : sessionError && !isLoginPage ? (
     <div
@@ -456,19 +455,22 @@ function AdminShell({ children }: { children: React.ReactNode }) {
             href="/admin/dashboard"
             onClick={() => setMobileNavOpen(false)}
           >
-            <Image
-              alt=""
-              className="vr-admin-brand-mark"
-              height={40}
-              src="/brand/virtual-rudra-logo.png?v=2"
-              unoptimized
-              width={40}
-            />
+            <span aria-hidden="true" className="vr-admin-brand-mark">
+              ₹
+            </span>
             <span>
               <strong>Virtual Rudra</strong>
               <small>Restaurant Admin</small>
             </span>
           </Link>
+          <button
+            aria-label="Close admin menu"
+            className="vr-admin-drawer-close"
+            onClick={() => setMobileNavOpen(false)}
+            type="button"
+          >
+            <AdminNavIcon name="close" />
+          </button>
           <p className="vr-admin-nav-caption">WORKSPACE</p>
           <nav aria-label="Admin navigation" className="vr-admin-nav">
             {adminNavigation.map((item) => (
@@ -567,23 +569,6 @@ function AdminShell({ children }: { children: React.ReactNode }) {
           {logoutError && <p className="vr-admin-error" role="alert">{logoutError}</p>}
         </div>
 
-        <nav aria-label="Mobile admin navigation" className="vr-admin-bottom-nav">
-          {adminNavigation.map((item) => (
-            <Link
-              aria-current={pathname === item.href ? "page" : undefined}
-              className={pathname === item.href ? "is-active" : ""}
-              href={item.href}
-              key={item.href}
-            >
-              <AdminNavIcon name={item.icon} />
-              <span>{item.label}</span>
-            </Link>
-          ))}
-          <button onClick={() => void handleSignOut()} type="button">
-            <AdminNavIcon name="logout" />
-            <span>Logout</span>
-          </button>
-        </nav>
       </div>
     </div>
   );
@@ -602,7 +587,8 @@ function AdminNavIcon({
     | "profile"
     | "logout"
     | "sun"
-    | "moon";
+    | "moon"
+    | "close";
 }) {
   const paths = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
@@ -615,6 +601,7 @@ function AdminNavIcon({
     logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></>,
     moon: <><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" /></>,
+    close: <><path d="m6 6 12 12M18 6 6 18" /></>,
   };
 
   return (

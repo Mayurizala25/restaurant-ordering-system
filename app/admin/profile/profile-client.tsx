@@ -362,7 +362,7 @@ export default function AdminProfileClient() {
           </nav>
         </header>
 
-        <main className="vr-admin-management-page mx-auto w-full max-w-[1050px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+        <main className="vr-admin-profile-page vr-admin-management-page mx-auto w-full max-w-[1050px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
           <AdminPageHeading
             description="Manage the information shown to your guests."
             eyebrow="RESTAURANT SETTINGS"
@@ -370,7 +370,7 @@ export default function AdminProfileClient() {
           />
 
           <form
-            className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+            className="vr-admin-profile-form overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
             onSubmit={handleSave}
           >
             <div className="border-b border-[#e5e8e2] px-5 py-4 sm:px-7">

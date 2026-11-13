@@ -124,7 +124,7 @@ export default function AdminFeedbackClient() {
   const fiveStarCount = feedback.filter((entry) => entry.rating === 5).length;
 
   return (
-    <main className="vr-admin-route-page min-h-screen bg-[#111318] px-4 py-6 text-[#f3f4f6] sm:px-7 sm:py-8 lg:px-10">
+    <main className="vr-admin-feedback-page vr-admin-route-page min-h-screen bg-[#111318] px-4 py-6 text-[#f3f4f6] sm:px-7 sm:py-8 lg:px-10">
       <div className="mx-auto w-full max-w-[1100px]">
         <AdminPageHeading
           description="Guest ratings and comments from recent orders."
@@ -192,7 +192,7 @@ export default function AdminFeedbackClient() {
           ) : (
             <ul className="divide-y divide-[#30343d]">
               {feedback.map((entry) => (
-                <li className="grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" key={entry.id}>
+                <li className="vr-admin-feedback-card grid gap-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start" key={entry.id}>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span

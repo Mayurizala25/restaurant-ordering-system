@@ -2637,10 +2637,17 @@
 }
 
 .vr-admin-brand-mark {
+  display: grid;
   width: 40px;
   height: 40px;
   flex: none;
-  object-fit: contain;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--admin-accent-soft);
+  color: var(--admin-accent);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .vr-admin-brand strong,
@@ -3632,6 +3639,763 @@
 
   .vr-admin-bottom-nav {
     padding-inline: 5px;
+  }
+}
+
+@media (max-width: 760px) {
+  body:has(.vr-admin-theme) {
+    min-width: 0;
+  }
+
+  .vr-admin-bottom-nav {
+    display: flex;
+    justify-content: flex-start;
+    gap: 3px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .vr-admin-bottom-nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vr-admin-bottom-nav a,
+  .vr-admin-bottom-nav button {
+    min-height: 54px;
+    flex: 0 0 clamp(64px, 17vw, 76px);
+    flex-direction: column;
+    gap: 4px;
+    padding: 5px 3px;
+  }
+
+  .vr-admin-bottom-nav svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .vr-admin-bottom-nav span {
+    font-size: 9px;
+    line-height: 1.2;
+  }
+
+  .vr-admin-content > main.vr-admin-route-page {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .vr-admin-content .vr-admin-management-page {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom));
+  }
+
+  .vr-admin-page-heading {
+    gap: 10px 16px;
+    margin-bottom: 20px;
+  }
+
+  .vr-admin-page-description {
+    max-width: 42rem;
+    font-size: 13px;
+  }
+
+  .vr-admin-categories-table-wrap {
+    overflow: visible;
+  }
+
+  .vr-admin-categories-table {
+    display: block;
+    min-width: 0;
+  }
+
+  .vr-admin-categories-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .vr-admin-categories-table tbody {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .vr-admin-categories-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--admin-border);
+    border-radius: 12px;
+    background: var(--admin-surface);
+  }
+
+  .vr-admin-categories-table tbody td {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px solid var(--admin-border);
+    padding: 11px 12px;
+    font-size: 12px;
+  }
+
+  .vr-admin-categories-table tbody td::before {
+    color: var(--admin-muted);
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .vr-admin-categories-table tbody td.vr-admin-category-cell {
+    grid-column: 1 / -1;
+    border-top: 0;
+    padding: 14px 12px;
+  }
+
+  .vr-admin-categories-table tbody td.vr-admin-category-cell::before {
+    content: none;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Actions"] {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Actions"] > div {
+    justify-content: flex-start;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Status"] {
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 430px) {
+  .vr-admin-content .vr-admin-management-page {
+    padding-inline: 14px;
+    padding-top: 20px;
+  }
+
+  .vr-admin-page-heading h1 {
+    font-size: clamp(23px, 7vw, 29px);
+  }
+
+  .vr-admin-page-description {
+    line-height: 1.5;
+  }
+
+  .vr-admin-categories-table tbody {
+    gap: 8px;
+    padding: 9px;
+  }
+
+  .vr-admin-categories-table tbody td {
+    padding: 10px;
+  }
+
+  .vr-admin-header-actions {
+    gap: 6px;
+  }
+
+  .vr-admin-theme-toggle,
+  .vr-admin-notification-trigger {
+    min-height: 40px;
+    width: 40px;
+  }
+
+  .vr-admin-theme .vr-dashboard-page .vr-dashboard-stats {
+    gap: 9px;
+  }
+
+  .vr-admin-theme .vr-dashboard-page .vr-dashboard-stat-card {
+    padding: 12px;
+  }
+
+  .vr-admin-theme .vr-dashboard-page .vr-dashboard-stat-card > div > p {
+    font-size: 12px;
+  }
+
+  .vr-admin-theme .vr-dashboard-page .vr-dashboard-stat-card > p:nth-child(2) {
+    margin-top: 12px;
+    font-size: 22px;
+  }
+
+  .vr-admin-theme :is(input, textarea, select) {
+    font-size: 16px;
+  }
+}
+
+/* Mobile admin workspace refresh */
+.vr-admin-drawer-close {
+  display: none;
+}
+
+.vr-admin-bottom-nav {
+  display: none !important;
+}
+
+@media (max-width: 760px) {
+  body:has(.vr-admin-theme) {
+    min-width: 0;
+  }
+
+  .vr-admin-sidebar {
+    position: fixed;
+    width: min(86vw, 320px);
+    padding: max(22px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
+    background: var(--admin-surface);
+  }
+
+  .vr-admin-sidebar.is-mobile-open {
+    transform: translateX(0);
+  }
+
+  .vr-admin-brand {
+    max-width: calc(100% - 44px);
+    padding: 0 0 25px 4px;
+  }
+
+  .vr-admin-drawer-close {
+    position: absolute;
+    top: max(18px, env(safe-area-inset-top));
+    right: 16px;
+    display: grid;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border: 1px solid var(--admin-border);
+    border-radius: 12px;
+    background: var(--admin-surface-2);
+    color: var(--admin-text);
+  }
+
+  .vr-admin-drawer-close svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .vr-admin-nav-caption {
+    margin: 4px 8px 11px;
+  }
+
+  .vr-admin-nav {
+    gap: 7px;
+  }
+
+  .vr-admin-nav a,
+  .vr-admin-logout {
+    min-height: 48px;
+    border-radius: 12px;
+    padding-inline: 13px;
+    font-size: 14px;
+  }
+
+  .vr-admin-nav-icon {
+    width: 20px;
+    height: 20px;
+  }
+
+  .vr-admin-logout {
+    border-top: 1px solid var(--admin-border);
+    border-radius: 10px 10px 0 0;
+    padding-top: 17px;
+  }
+
+  .vr-admin-header {
+    min-height: 62px;
+    padding-inline: 14px;
+  }
+
+  .vr-admin-header-title {
+    font-size: 15px;
+  }
+
+  .vr-admin-mobile-menu,
+  .vr-admin-theme-toggle,
+  .vr-admin-notification-trigger {
+    width: 42px;
+    height: 42px;
+    min-height: 42px;
+    border-radius: 12px;
+  }
+
+  .vr-admin-content > main.vr-admin-route-page {
+    min-height: auto;
+    padding: 22px 16px 36px;
+  }
+
+  .vr-admin-content .vr-admin-management-page {
+    padding: 22px 16px 36px;
+  }
+
+  .vr-admin-page-heading {
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .vr-admin-page-heading h1 {
+    font-size: clamp(25px, 7vw, 31px);
+    line-height: 1.12;
+  }
+
+  .vr-admin-page-eyebrow {
+    margin-bottom: 7px;
+    font-size: 10px;
+  }
+
+  .vr-admin-page-description {
+    margin-top: 7px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .vr-admin-page-actions {
+    width: 100%;
+  }
+
+  .vr-admin-page-actions > * {
+    min-height: 44px;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .vr-admin-metric-grid,
+  .vr-admin-table-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .vr-admin-metric-card,
+  .vr-admin-table-summary > article {
+    min-height: 126px;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 10px;
+    border-radius: 15px;
+    padding: 14px;
+  }
+
+  .vr-admin-metric-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 11px;
+  }
+
+  .vr-admin-metric-copy {
+    width: 100%;
+    gap: 4px;
+  }
+
+  .vr-admin-metric-copy p,
+  .vr-admin-metric-copy span {
+    font-size: 11px;
+    line-height: 1.35;
+  }
+
+  .vr-admin-metric-copy strong {
+    font-size: 24px;
+  }
+
+  .vr-admin-categories-page > section,
+  .vr-admin-menu-items-page > section,
+  .vr-admin-tables-page > section[aria-label="Restaurant tables"],
+  .vr-admin-profile-form,
+  .vr-admin-feedback-panel,
+  .vr-admin-activity-panel,
+  .vr-admin-scan-chart,
+  .vr-dashboard-page .vr-dashboard-secondary > section,
+  .vr-dashboard-page .vr-dashboard-orders {
+    overflow: hidden;
+    border: 1px solid var(--admin-border) !important;
+    border-radius: 16px !important;
+    background: var(--admin-surface) !important;
+    box-shadow: var(--shadow);
+  }
+
+  .vr-admin-categories-page > section > div:first-child,
+  .vr-admin-menu-items-page > section > div:first-child,
+  .vr-admin-tables-page > section[aria-label="Restaurant tables"] > div:first-child {
+    padding: 15px;
+  }
+
+  .vr-admin-categories-table-wrap {
+    overflow: visible;
+  }
+
+  .vr-admin-categories-table {
+    display: block;
+    min-width: 0;
+  }
+
+  .vr-admin-categories-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .vr-admin-categories-table tbody {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .vr-admin-categories-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--admin-border);
+    border-radius: 14px;
+    background: var(--admin-surface);
+  }
+
+  .vr-admin-categories-table tbody td {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-top: 1px solid var(--admin-border);
+    padding: 11px 12px;
+    font-size: 12px;
+  }
+
+  .vr-admin-categories-table tbody td::before {
+    color: var(--admin-muted);
+    content: attr(data-label);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .vr-admin-categories-table tbody td.vr-admin-category-cell {
+    grid-column: 1 / -1;
+    border-top: 0;
+    padding: 14px 12px;
+  }
+
+  .vr-admin-categories-table tbody td.vr-admin-category-cell::before {
+    content: none;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Actions"] {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Actions"] > div {
+    justify-content: flex-start;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Status"] {
+    justify-content: space-between;
+  }
+
+  .vr-admin-categories-table tbody td[data-label="Actions"] button,
+  .vr-admin-table-actions button,
+  .vr-admin-menu-item-card > div:last-child button {
+    min-height: 40px;
+    padding-inline: 12px;
+  }
+
+  .vr-admin-menu-items-page > section > div:nth-child(2) {
+    gap: 12px;
+  }
+
+  .vr-admin-menu-items-page [aria-label="Quick category filters"] {
+    margin-inline: -2px;
+    padding-bottom: 5px;
+    scrollbar-width: none;
+  }
+
+  .vr-admin-menu-items-page [aria-label="Quick category filters"]::-webkit-scrollbar {
+    display: none;
+  }
+
+  .vr-admin-menu-item-card {
+    display: grid;
+    grid-template-columns: 64px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    border-bottom-color: var(--admin-border);
+    padding: 14px;
+    background: var(--admin-surface) !important;
+  }
+
+  .vr-admin-menu-item-card > [role="img"] {
+    width: 64px;
+    height: 64px;
+    border-radius: 13px;
+  }
+
+  .vr-admin-menu-item-card > div:nth-child(2) {
+    min-width: 0;
+  }
+
+  .vr-admin-menu-item-card h4 {
+    font-size: 15px;
+    line-height: 1.35;
+  }
+
+  .vr-admin-menu-item-card > div:nth-child(2) > p {
+    font-size: 12px;
+    line-height: 1.55;
+  }
+
+  .vr-admin-menu-item-card > div:last-child {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+  }
+
+  .vr-admin-menu-item-card > div:last-child button {
+    border-color: var(--admin-border-strong);
+    border-radius: 10px;
+    color: var(--admin-text);
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .vr-admin-table-card {
+    border-color: var(--admin-border) !important;
+    border-radius: 15px;
+    background: var(--admin-surface) !important;
+    padding: 15px;
+  }
+
+  .vr-admin-table-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .vr-admin-table-actions button:first-child {
+    grid-column: 1 / -1;
+    justify-content: center;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stats {
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stat-card {
+    min-height: 128px;
+    border-radius: 15px !important;
+    padding: 14px !important;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stat-card > div > p {
+    color: var(--admin-muted) !important;
+    font-size: 12px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stat-card > div > span {
+    width: 34px;
+    height: 34px;
+    border-radius: 11px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stat-card > p:nth-child(2) {
+    margin-top: 13px;
+    color: var(--admin-text);
+    font-size: 24px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-stat-card > p:last-child {
+    color: var(--admin-muted) !important;
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .vr-dashboard-page .vr-dashboard-quick-actions {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 9px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-quick-actions > a {
+    border-color: var(--admin-border);
+    border-radius: 15px;
+    background: var(--admin-surface) !important;
+    padding: 15px;
+  }
+
+  .vr-dashboard-page .vr-dashboard-quick-actions > a > span:first-child {
+    width: 42px;
+    height: 42px;
+    flex-basis: 42px;
+    border: 1px solid var(--admin-border);
+    background: var(--admin-surface-2);
+    color: var(--admin-accent);
+  }
+
+  .vr-dashboard-page .vr-dashboard-quick-actions > a > span:nth-child(2) > span:first-child {
+    color: var(--admin-text);
+  }
+
+  .vr-dashboard-page .vr-dashboard-quick-actions > a > span:nth-child(2) > span:nth-child(2) {
+    color: var(--admin-muted);
+    line-height: 1.5;
+  }
+
+  .vr-dashboard-orders > ul {
+    display: grid;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .vr-dashboard-order-card {
+    border: 1px solid var(--admin-border);
+    border-radius: 13px;
+    background: var(--admin-surface);
+    padding: 14px !important;
+  }
+
+  .vr-dashboard-order-card > div:first-child {
+    gap: 13px;
+  }
+
+  .vr-dashboard-order-card dl {
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .vr-dashboard-order-card dl dt {
+    font-size: 10px;
+  }
+
+  .vr-dashboard-order-card dl dd {
+    overflow-wrap: anywhere;
+    font-size: 12px;
+  }
+
+  .vr-admin-feedback-card {
+    margin: 10px;
+    border: 1px solid var(--admin-border);
+    border-radius: 13px;
+    background: var(--admin-surface);
+    padding: 14px !important;
+  }
+
+  .vr-admin-feedback-panel > ul {
+    display: grid;
+    gap: 2px;
+    padding: 10px 4px;
+  }
+
+  .vr-admin-feedback-card > time {
+    color: var(--admin-muted);
+    font-size: 11px;
+  }
+
+  .vr-admin-analytics-page .vr-admin-scan-chart {
+    padding: 13px;
+  }
+
+  .vr-admin-analytics-page .vr-admin-scan-chart-bars {
+    min-height: 146px;
+    gap: 7px;
+  }
+
+  .vr-admin-analytics-page .vr-admin-scan-bar-track {
+    width: min(100%, 24px);
+  }
+
+  .vr-admin-analytics-page .vr-admin-activity-panel > ul {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .vr-admin-analytics-page .vr-admin-activity-panel > ul > li {
+    border: 1px solid var(--admin-border);
+    border-radius: 12px;
+    background: var(--admin-surface);
+    padding: 12px;
+  }
+
+  .vr-admin-profile-form > div:nth-child(2) {
+    padding: 17px 15px;
+  }
+
+  .vr-admin-profile-form > div:nth-child(2) > section {
+    border-color: var(--admin-border);
+  }
+
+  .vr-admin-profile-form input,
+  .vr-admin-profile-form textarea {
+    width: 100%;
+    min-height: 46px;
+    border-radius: 11px;
+  }
+
+  .vr-admin-profile-form label {
+    margin-bottom: 7px;
+    color: var(--admin-text);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .vr-admin-profile-form > div:last-child {
+    padding: 14px 15px;
+  }
+
+  .vr-admin-profile-form > div:last-child > button {
+    min-height: 46px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 430px) {
+  .vr-admin-content > main.vr-admin-route-page,
+  .vr-admin-content .vr-admin-management-page {
+    padding-inline: 14px;
+  }
+
+  .vr-admin-categories-page > section > div:first-child,
+  .vr-admin-menu-items-page > section > div:first-child,
+  .vr-admin-tables-page > section[aria-label="Restaurant tables"] > div:first-child {
+    padding: 13px;
+  }
+
+  .vr-admin-metric-card,
+  .vr-admin-table-summary > article,
+  .vr-dashboard-page .vr-dashboard-stat-card {
+    min-height: 120px;
+    padding: 12px !important;
+  }
+
+  .vr-admin-feedback-card {
+    margin-inline: 7px;
+  }
+
+  .vr-admin-menu-item-card {
+    grid-template-columns: 56px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .vr-admin-menu-item-card > [role="img"] {
+    width: 56px;
+    height: 56px;
+  }
+
+  .vr-admin-table-actions button {
+    min-width: 0;
+    padding-inline: 8px;
+    font-size: 11px;
+  }
+
+  .vr-admin-profile-form > div:nth-child(2) {
+    padding-inline: 12px;
   }
 }
 

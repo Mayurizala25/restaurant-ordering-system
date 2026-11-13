@@ -707,7 +707,7 @@ export function AdminDashboardClient() {
             />
           </section>
 
-          <section aria-labelledby="recent-orders-heading" className="mb-6 overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]">
+          <section aria-labelledby="recent-orders-heading" className="vr-dashboard-orders mb-6 overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]">
             <div className="flex items-center justify-between border-b border-[#e5e8e2] px-5 py-4 sm:px-6">
               <div>
                 <h2 className="font-bold" id="recent-orders-heading">Recent orders</h2>
@@ -936,7 +936,7 @@ function OrderRow({
 
   return (
     <li
-      className="min-w-0 scroll-mt-6 px-5 py-5 sm:px-6"
+      className="vr-dashboard-order-card min-w-0 scroll-mt-6 px-5 py-5 sm:px-6"
       id={`order-${order.id}`}
     >
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

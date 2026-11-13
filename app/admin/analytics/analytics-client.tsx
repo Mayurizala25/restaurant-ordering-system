@@ -130,7 +130,7 @@ export default function AdminAnalyticsClient() {
   const maxDailyScans = Math.max(...scanDays.map((day) => day.count), 1);
 
   return (
-    <main className="vr-admin-route-page min-h-screen bg-[#111318] px-4 py-6 text-[#f3f4f6] sm:px-7 sm:py-8 lg:px-10">
+    <main className="vr-admin-analytics-page vr-admin-route-page min-h-screen bg-[#111318] px-4 py-6 text-[#f3f4f6] sm:px-7 sm:py-8 lg:px-10">
       <div className="mx-auto w-full max-w-[1100px]">
         <AdminPageHeading
           description="See how guests discover your menu at the table."

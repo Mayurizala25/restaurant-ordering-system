@@ -467,7 +467,7 @@ export default function AdminCategoriesClient() {
           </nav>
         </header>
 
-        <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+        <main className="vr-admin-categories-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
           <AdminPageHeading
             description="Organize the menu and control which categories are visible."
             eyebrow="MENU MANAGEMENT"
@@ -541,8 +541,8 @@ export default function AdminCategoriesClient() {
                   : loadError || "Category data could not be loaded."}
               </p>
             ) : filteredCategories.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[690px] text-left text-sm">
+              <div className="vr-admin-categories-table-wrap overflow-x-auto">
+                <table className="vr-admin-categories-table w-full min-w-[690px] text-left text-sm">
                   <thead className="bg-[#f8f9f6] text-[10px] font-semibold uppercase tracking-wide text-[#747b75]">
                     <tr>
                       <th className="px-5 py-3 font-semibold sm:px-6">Category</th>
@@ -557,7 +557,7 @@ export default function AdminCategoriesClient() {
                       const count = categoryCounts.get(category.id) ?? 0;
                       return (
                         <tr className="align-top hover:bg-[#fbfcfa]" key={category.id}>
-                          <td className="px-5 py-4 sm:px-6">
+                          <td className="vr-admin-category-cell px-5 py-4 sm:px-6">
                             <div className="flex items-start gap-3">
                               <CategoryImage category={category} />
                               <div className="min-w-0">
@@ -568,11 +568,11 @@ export default function AdminCategoriesClient() {
                               </div>
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-[#747b75]">
+                          <td data-label="Menu items" className="px-4 py-4 text-[#747b75]">
                             {count} {count === 1 ? "item" : "items"}
                           </td>
-                          <td className="px-4 py-4 text-[#535b55]">{category.sortOrder}</td>
-                          <td className="px-4 py-4">
+                          <td data-label="Order" className="px-4 py-4 text-[#535b55]">{category.sortOrder}</td>
+                          <td data-label="Status" className="px-4 py-4">
                             <button
                               aria-label={`${category.isActive ? "Deactivate" : "Activate"} ${category.name}`}
                               aria-pressed={category.isActive}
@@ -588,8 +588,8 @@ export default function AdminCategoriesClient() {
                               {category.isActive ? "Active" : "Inactive"}
                             </button>
                           </td>
-                          <td className="px-5 py-4 sm:px-6">
-                            <div className="flex justify-end gap-2">
+                          <td data-label="Actions" className="px-5 py-4 sm:px-6">
+                            <div className="flex flex-wrap justify-end gap-2">
                               <button
                                 className="rounded-lg border border-[#e5e8e2] px-3 py-1.5 text-xs font-medium text-[#535b55] hover:border-[#185c43] hover:text-[#185c43]"
                                 disabled={processingCategoryId !== null || isSaving}
