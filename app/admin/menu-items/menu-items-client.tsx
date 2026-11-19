@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DemoCategory, DemoData, DemoMenuItem } from "../_lib/demo-data";
 import { loadDemoData, saveDemoData } from "../_lib/demo-storage";
-import { SignOutButton } from "../_lib/admin-provider";
 import { AdminPageHeading } from "../_components/admin-page";
 import {
   createTimeoutSignal,
@@ -21,13 +20,6 @@ type ItemForm = {
   imageUrl: string;
   isAvailable: boolean;
 };
-
-const navigation = [
-  { label: "Dashboard", href: "/admin/dashboard", icon: "dashboard" },
-  { label: "Menu Categories", href: "/admin/categories", icon: "category" },
-  { label: "Menu Items", href: "/admin/menu-items", icon: "menu", active: true },
-  { label: "Profile", href: "/admin/profile", icon: "profile" },
-] as const;
 
 const inputClass =
   "h-11 w-full rounded-[10px] border border-[#e5e8e2] bg-white px-3 text-sm text-[#202521] outline-none transition placeholder:text-[#929a93] focus:border-[#185c43] focus:ring-2 focus:ring-[#185c43]/15";
@@ -246,6 +238,8 @@ export default function AdminMenuItemsClient() {
     }
     return counts;
   }, [items]);
+  const availableCount = items.filter((item) => item.isAvailable).length;
+  const activeCategoryCount = categories.filter((category) => category.isActive).length;
   const filteredItems = useMemo(() => {
     const query = search.trim().toLowerCase();
     return items
@@ -260,21 +254,15 @@ export default function AdminMenuItemsClient() {
         );
       });
   }, [categories, categoryFilter, items, search]);
-  const filteredGroups = useMemo(
+  const visibleItems = useMemo(
     () =>
-      sortedCategories
-        .filter(
-          (category) =>
-            categoryFilter === "all" || category.id === categoryFilter,
-        )
-        .map((category) => ({
-          category,
-          items: filteredItems.filter((item) => item.categoryId === category.id),
-        }))
-        .filter((group) => group.items.length > 0),
-    [categoryFilter, filteredItems, sortedCategories],
+      sortedCategories.flatMap((category) =>
+        filteredItems
+          .filter((item) => item.categoryId === category.id)
+          .map((item) => ({ item, category })),
+      ),
+    [filteredItems, sortedCategories],
   );
-
   function resetForm() {
     setEditingId(null);
     setForm({
@@ -685,43 +673,28 @@ export default function AdminMenuItemsClient() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f6f2] text-[#202521] md:flex">
-      <aside className="hidden w-[248px] shrink-0 border-r border-[#e5e8e2] bg-white px-4 py-6 md:flex md:flex-col">
-        <Brand />
-        <p className="mb-3 mt-10 px-3 text-[10px] font-bold tracking-[0.16em] text-[#929a93]">WORKSPACE</p>
-        <nav aria-label="Admin navigation" className="space-y-1">
-          {navigation.map((item) => <NavigationLink key={item.label} {...item} />)}
-        </nav>
-        <AdminIdentity />
-      </aside>
-
-      <div className="min-w-0 flex-1">
-        <header className="border-b border-[#e5e8e2] bg-white px-5 py-4 sm:px-8 md:px-10">
-          <div className="flex items-center justify-between gap-3">
-            <div className="md:hidden"><Brand /></div>
-            <p className="hidden text-sm font-medium text-[#535b55] md:block">Menu management</p>
-            <SignOutButton />
-          </div>
-          <nav aria-label="Admin navigation" className="mt-4 flex gap-2 overflow-x-auto md:hidden">
-            {navigation.map((item) => <NavigationLink key={item.label} {...item} mobile />)}
-          </nav>
-        </header>
-
-        <main className="vr-admin-menu-items-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
+    <>
+      <main className="vr-admin-menu-items-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-4 py-5 sm:px-8 sm:py-7 md:px-10">
           <AdminPageHeading
-            description="A clear view of your dishes, categories, pricing, and availability."
+              description="Manage dishes, categories, pricing, and availability."
             eyebrow="MENU MANAGEMENT"
-            title="Menu items"
+              title="Menu Items Catalog"
           >
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(249,115,22,0.16)] transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!data || categories.length === 0}
-              onClick={openAddModal}
-              type="button"
-            >
-              <Icon name="plus" />
-              Add item
-            </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex h-9 items-center gap-2 rounded-full border border-[#d7e8dc] bg-[#edf5ef] px-3 text-xs font-medium text-[#185c43]">
+                  <span className="size-2 rounded-full bg-[#20704d]" />
+                  {data && !loadError ? "Sync active" : loading ? "Syncing" : "Sync unavailable"}
+                </span>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#f97316] px-4 text-sm font-semibold text-white shadow-[0_8px_24px_rgba(249,115,22,0.16)] transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!data || categories.length === 0}
+                  onClick={openAddModal}
+                  type="button"
+                >
+                  <Icon name="plus" />
+                  Add new dish
+                </button>
+              </div>
           </AdminPageHeading>
 
           {(loadError || actionError || feedback) && (
@@ -750,25 +723,26 @@ export default function AdminMenuItemsClient() {
             </div>
           )}
 
+          <div className="mb-5 hidden grid-cols-2 gap-3 md:grid md:grid-cols-4">
+            <SummaryCard detail="Menu dishes" label="Total catalog" value={data ? items.length : 0} />
+            <SummaryCard detail="Available to order" label="Live" value={data ? availableCount : 0} />
+            <SummaryCard detail="Currently paused" label="Paused" value={data ? items.length - availableCount : 0} />
+            <SummaryCard detail="Visible categories" label="Categories" value={data ? activeCategoryCount : 0} />
+          </div>
+
           <section
             aria-busy={loading}
-            className="overflow-hidden rounded-2xl border border-[#2a2e38] bg-[#171a20] shadow-[0_18px_48px_rgba(0,0,0,0.14)]"
+            className="overflow-hidden rounded-2xl border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.05)]"
           >
-            <div className="flex flex-col gap-4 border-b border-[#2a2e38] px-5 py-5 sm:px-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="border-b border-[#e5e8e2] p-4 sm:p-5">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <h2 className="font-semibold text-[#f3f4f6]">Menu catalogue</h2>
-                  <p className="mt-1 text-xs text-[#9299a6]">
-                    {items.length} {items.length === 1 ? "item" : "items"} · {items.filter((item) => item.isAvailable).length} available
+                  <h2 className="font-semibold">Menu catalog</h2>
+                  <p className="mt-1 text-xs text-[#747b75]">
+                    {items.length} dishes · {availableCount} available · {filteredItems.length} shown
                   </p>
                 </div>
-                <div className="flex items-center gap-2 rounded-full border border-[#30343d] bg-[#20242c] px-3 py-1.5 text-xs text-[#b8bdc7]">
-                  <span className="size-2 rounded-full bg-[#f97316]" />
-                  {filteredItems.length} shown
-                </div>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_240px]">
-                <label className="relative block">
+                <label className="relative block w-full sm:max-w-sm">
                   <span className="sr-only">Search menu items</span>
                   <span className="pointer-events-none absolute inset-y-0 left-3 grid place-items-center text-[#747b75]">
                     <Icon name="search" />
@@ -776,27 +750,15 @@ export default function AdminMenuItemsClient() {
                   <input
                     className={`${inputClass} pl-10`}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Search dishes, details, or category"
+                    placeholder="Search dish name or category"
                     type="search"
                     value={search}
                   />
                 </label>
-                <label className="sr-only" htmlFor="category-filter">Filter by category</label>
-                <select
-                  className={inputClass}
-                  id="category-filter"
-                  onChange={(event) => setCategoryFilter(event.target.value)}
-                  value={categoryFilter}
-                >
-                  <option value="all">All categories</option>
-                  {sortedCategories.map((category) => (
-                    <option key={category.id} value={category.id}>{category.name}</option>
-                  ))}
-                </select>
               </div>
               <div
                 aria-label="Quick category filters"
-                className="flex gap-2 overflow-x-auto pb-1"
+                className="mt-4 flex gap-2 overflow-x-auto pb-1"
                 role="group"
               >
                 <CategoryFilter
@@ -819,49 +781,30 @@ export default function AdminMenuItemsClient() {
 
             {!data ? (
               <p className="px-6 py-10 text-center text-sm text-[#747b75]">
-                {loading
-                  ? "Loading menu items…"
-                  : loadError || "Menu data could not be loaded."}
+                {loading ? "Loading menu items…" : loadError || "Menu data could not be loaded."}
               </p>
-            ) : filteredItems.length ? (
-              <div className="divide-y divide-[#2a2e38]">
-                {filteredGroups.map(({ category, items: groupItems }) => (
-                  <section
-                    aria-label={`${category.name} menu items`}
-                    className="p-4 sm:p-5"
-                    key={category.id}
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="size-1.5 shrink-0 rounded-full bg-[#f97316]" />
-                        <h3 className="truncate text-sm font-semibold text-[#f3f4f6]">
-                          {category.name}
-                        </h3>
-                        {!category.isActive && (
-                          <span className="rounded-full border border-[#3c414b] bg-[#242830] px-2 py-0.5 text-[10px] font-medium text-[#a7adba]">
-                            Inactive category
-                          </span>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-xs text-[#777e89]">
-                        {groupItems.length} {groupItems.length === 1 ? "item" : "items"}
-                      </span>
-                    </div>
-                    <div className="overflow-hidden rounded-xl border border-[#30343d] bg-[#1c2027]">
-                      {groupItems.map((item) => (
-                        <MenuItemCard
-                          category={category}
-                          item={item}
-                          key={item.id}
-                          onDelete={deleteItem}
-                          onEdit={openEditModal}
-                          onToggleAvailability={toggleAvailability}
-                          busy={processingItemId !== null}
-                        />
-                      ))}
-                    </div>
-                  </section>
-                ))}
+            ) : visibleItems.length ? (
+              <div>
+                <div className="hidden grid-cols-[minmax(0,1.8fr)_minmax(72px,0.7fr)_60px_72px_64px] gap-2 border-b border-[#e5e8e2] bg-[#f8f9f6] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[#747b75] md:grid xl:grid-cols-[minmax(0,1.5fr)_110px_85px_96px_82px]">
+                  <span>Dish details</span>
+                  <span>Category</span>
+                  <span>Price</span>
+                  <span>Live status</span>
+                  <span className="text-center">Actions</span>
+                </div>
+                <div className="divide-y divide-[#edf0eb]">
+                  {visibleItems.map(({ item, category }) => (
+                    <MenuItemCard
+                      category={category}
+                      item={item}
+                      key={item.id}
+                      onDelete={deleteItem}
+                      onEdit={openEditModal}
+                      onToggleAvailability={toggleAvailability}
+                      busy={processingItemId !== null}
+                    />
+                  ))}
+                </div>
               </div>
             ) : (
               <div className="px-6 py-14 text-center">
@@ -891,10 +834,9 @@ export default function AdminMenuItemsClient() {
             )}
           </section>
           <p className="mt-5 text-center text-xs text-[#929a93]">
-            Product changes are saved to Supabase.
+            Menu item changes are saved to Supabase.
           </p>
-        </main>
-      </div>
+      </main>
 
       {isModalOpen && (
         <ItemModal
@@ -914,7 +856,17 @@ export default function AdminMenuItemsClient() {
           onSave={saveItem}
         />
       )}
-    </div>
+    </>
+  );
+}
+
+function SummaryCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <article className="min-w-0 rounded-xl border border-[#e5e8e2] bg-white p-3 shadow-[0_4px_14px_rgba(26,45,35,0.03)]">
+      <p className="truncate text-[10px] font-medium uppercase tracking-wide text-[#747b75]">{label}</p>
+      <p className="mt-1 text-xl font-bold tracking-tight">{value}</p>
+      <p className="mt-0.5 truncate text-[10px] text-[#929a93]">{detail}</p>
+    </article>
   );
 }
 
@@ -934,54 +886,117 @@ function MenuItemCard({
   onToggleAvailability: (item: DemoMenuItem) => void;
 }) {
   return (
-    <article className="vr-admin-menu-item-card flex flex-col gap-4 border-b border-[#2a2e38] p-4 last:border-b-0 hover:bg-[#20242c]/60 sm:flex-row sm:items-center sm:p-5">
-      <ItemImage item={item} />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h4 className="font-semibold text-[#f3f4f6]">{item.name}</h4>
-          <span className="rounded-full border border-[#493021] bg-[#2c211b] px-2.5 py-1 text-[10px] font-semibold text-[#ff9a4d]">
-            {category?.name ?? "Uncategorized"}
-          </span>
-        </div>
-        <p className="mt-1 line-clamp-2 text-sm leading-5 text-[#9299a6]">
-          {item.description || "No description"}
-        </p>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
-          <span className="font-semibold tabular-nums text-[#f3f4f6]">{formatINR.format(item.priceINR)}</span>
-          <button
-            aria-label={`Mark ${item.name} as ${item.isAvailable ? "unavailable" : "available"}`}
-            aria-pressed={item.isAvailable}
-            className="inline-flex items-center gap-2 rounded-full border border-[#30343d] bg-[#171a20] px-2.5 py-1 text-[11px] font-medium text-[#c5cad3] transition hover:border-[#484d58]"
-            disabled={busy}
-            onClick={() => onToggleAvailability(item)}
-            type="button"
-          >
-            <span className={`relative h-4 w-7 rounded-full transition ${item.isAvailable ? "bg-[#f97316]" : "bg-[#4a505b]"}`}>
-              <span className={`absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition ${item.isAvailable ? "left-[14px]" : "left-0.5"}`} />
+    <article className="grid grid-cols-[64px_minmax(0,1fr)_64px] items-center gap-2 p-3 transition hover:bg-[#f8f9f6] sm:gap-3 sm:p-4 md:grid-cols-[minmax(0,1.8fr)_minmax(72px,0.7fr)_60px_72px_64px] md:gap-2 md:px-3 md:py-2.5 xl:grid-cols-[minmax(0,1.5fr)_110px_85px_96px_82px]">
+      <div className="col-span-2 flex min-w-0 items-center gap-3 md:col-span-1">
+        <ItemImage className="size-16 md:size-12" item={item} />
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-sm font-semibold">{item.name}</h3>
+            <span className="shrink-0 rounded-full bg-[#f8f9f6] px-2 py-0.5 text-[10px] font-medium text-[#747b75] md:hidden">
+              {category?.name ?? "Uncategorized"}
             </span>
-            {item.isAvailable ? "Available" : "Unavailable"}
-          </button>
+          </div>
+          <p className="mt-1 line-clamp-1 text-xs leading-4 text-[#747b75] md:line-clamp-2">
+            {item.description || "No description"}
+          </p>
+          <div className="mt-1.5 flex items-center gap-2 md:hidden">
+            <strong className="text-sm font-bold tabular-nums">{formatINR.format(item.priceINR)}</strong>
+            <span
+              className={`rounded-md px-2 py-0.5 text-[10px] font-semibold ${
+                item.isAvailable
+                  ? "bg-[#e3f3ea] text-[#20704d]"
+                  : "bg-[#fff5f4] text-[#a3423c]"
+              }`}
+            >
+              {item.isAvailable ? "Live" : "Paused"}
+            </span>
+          </div>
         </div>
       </div>
-      <div className="flex gap-2 sm:ml-auto sm:shrink-0">
+      <div className="hidden min-w-0 md:block">
+        <span className="block truncate text-xs text-[#747b75]">{category?.name ?? "Uncategorized"}</span>
+        {!category?.isActive && (
+          <span className="mt-1 block text-[10px] text-[#a3423c]">Category inactive</span>
+        )}
+      </div>
+      <span className="hidden text-xs font-semibold tabular-nums md:block">
+        {formatINR.format(item.priceINR)}
+      </span>
+      <div className="hidden md:flex">
+        <AvailabilityToggle item={item} busy={busy} onToggle={onToggleAvailability} showLabel />
+      </div>
+      <div className="hidden items-center justify-center gap-1 md:flex">
         <button
-          className="rounded-lg border border-[#383d47] px-3 py-1.5 text-xs font-medium text-[#c5cad3] transition hover:border-[#f97316] hover:text-[#ff9a4d]"
+          aria-label={`Edit ${item.name}`}
+          className="grid size-7 place-items-center rounded-lg text-[#747b75] hover:bg-[#f1f3ef] hover:text-[#185c43] disabled:opacity-50 xl:size-8"
           disabled={busy}
           onClick={() => onEdit(item)}
           type="button"
         >
-          Edit
+          <Icon name="edit" />
         </button>
         <button
-          className="rounded-lg border border-[#493134] px-3 py-1.5 text-xs font-medium text-[#ff958a] transition hover:border-[#a25349] hover:bg-[#2b1f20]"
+          aria-label={`Delete ${item.name}`}
+          className="grid size-7 place-items-center rounded-lg text-[#a3423c] hover:bg-[#fff5f4] disabled:opacity-50 xl:size-8"
           disabled={busy}
           onClick={() => onDelete(item)}
           type="button"
         >
-          Delete
+          <Icon name="delete" />
         </button>
       </div>
+      <div className="col-start-3 row-start-1 flex flex-col items-center gap-1 md:hidden">
+        <AvailabilityToggle item={item} busy={busy} onToggle={onToggleAvailability} />
+        <div className="flex items-center gap-1">
+          <button
+            aria-label={`Edit ${item.name}`}
+            className="grid size-8 place-items-center rounded-lg text-[#747b75] hover:bg-[#f1f3ef] disabled:opacity-50"
+            disabled={busy}
+            onClick={() => onEdit(item)}
+            type="button"
+          >
+            <Icon name="edit" />
+          </button>
+          <button
+            aria-label={`Delete ${item.name}`}
+            className="grid size-8 place-items-center rounded-lg text-[#a3423c] hover:bg-[#fff5f4] disabled:opacity-50"
+            disabled={busy}
+            onClick={() => onDelete(item)}
+            type="button"
+          >
+            <Icon name="delete" />
+          </button>
+        </div>
+      </div>
     </article>
+  );
+}
+
+function AvailabilityToggle({
+  item,
+  busy,
+  onToggle,
+  showLabel = false,
+}: {
+  item: DemoMenuItem;
+  busy: boolean;
+  onToggle: (item: DemoMenuItem) => void;
+  showLabel?: boolean;
+}) {
+  return (
+    <button
+      aria-label={`${item.isAvailable ? "Pause" : "Make live"} ${item.name}`}
+      aria-pressed={item.isAvailable}
+      className="inline-flex min-h-8 items-center justify-center gap-2 rounded-full text-[10px] font-semibold text-[#535b55] disabled:opacity-50"
+      disabled={busy}
+      onClick={() => onToggle(item)}
+      type="button"
+    >
+      <span className={`relative h-5 w-9 rounded-full transition ${item.isAvailable ? "bg-[#20704d]" : "bg-[#b8bdc7]"}`}>
+        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition ${item.isAvailable ? "left-[18px]" : "left-0.5"}`} />
+      </span>
+      {showLabel && (item.isAvailable ? "Live" : "Paused")}
+    </button>
   );
 }
 
@@ -1001,14 +1016,14 @@ function CategoryFilter({
       aria-pressed={active}
       className={`inline-flex h-8 shrink-0 items-center gap-2 rounded-full border px-3 text-xs font-medium transition ${
         active
-          ? "border-[#f97316] bg-[#2c211b] text-[#ff9a4d]"
-          : "border-[#30343d] bg-[#1c2027] text-[#9299a6] hover:border-[#484d58] hover:text-[#f3f4f6]"
+          ? "border-[#f97316] bg-[#f97316] text-white"
+          : "border-[#e5e8e2] bg-[#f8f9f6] text-[#747b75] hover:border-[#f97316] hover:text-[#185c43]"
       }`}
       onClick={onClick}
       type="button"
     >
       {label}
-      <span className={active ? "text-[#ffb47b]" : "text-[#777e89]"}>{count}</span>
+      <span className={active ? "text-white/80" : "text-[#929a93]"}>{count}</span>
     </button>
   );
 }
@@ -1213,11 +1228,17 @@ function ItemModal({
   );
 }
 
-function ItemImage({ item }: { item: Pick<DemoMenuItem, "name" | "imageUrl"> }) {
+function ItemImage({
+  item,
+  className = "size-[76px] sm:size-[84px]",
+}: {
+  item: Pick<DemoMenuItem, "name" | "imageUrl">;
+  className?: string;
+}) {
   return (
     <div
       aria-label={`${item.name || "Menu item"} image`}
-      className="relative grid size-[76px] shrink-0 place-items-center overflow-hidden rounded-xl border border-[#e5e8e2] bg-gradient-to-br from-[#eef3e8] via-[#f5e9d4] to-[#e1eadc] sm:size-[84px]"
+      className={`relative grid ${className} shrink-0 place-items-center overflow-hidden rounded-xl border border-[#e5e8e2] bg-gradient-to-br from-[#eef3e8] via-[#f5e9d4] to-[#e1eadc]`}
       role="img"
       style={
         item.imageUrl
@@ -1241,76 +1262,18 @@ function ItemImage({ item }: { item: Pick<DemoMenuItem, "name" | "imageUrl"> }) 
   );
 }
 
-function AdminIdentity() {
-  return (
-    <div className="mt-auto border-t border-[#e5e8e2] pt-5">
-      <div className="flex items-center gap-3 px-2">
-        <span className="grid size-9 place-items-center rounded-xl bg-[#e5f1eb] text-xs font-bold text-[#185c43]">VR</span>
-        <span>
-          <span className="block text-sm font-semibold">Virtual Rudra</span>
-          <span className="block text-xs text-[#747b75]">Restaurant admin · demo</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function Brand() {
-  return (
-    <Link className="flex items-center gap-3 font-bold text-[#202521]" href="/admin/dashboard">
-      <span className="grid size-9 place-items-center rounded-xl bg-[#185c43] text-white">
-        <Icon name="restaurant" />
-      </span>
-      <span className="whitespace-nowrap">Virtual Rudra</span>
-    </Link>
-  );
-}
-
-function NavigationLink({
-  label,
-  href,
-  icon,
-  active = false,
-  mobile = false,
-}: {
-  label: string;
-  href: string;
-  icon: "dashboard" | "category" | "menu" | "profile";
-  active?: boolean;
-  mobile?: boolean;
-}) {
-  return (
-    <Link
-      aria-current={active ? "page" : undefined}
-      className={`flex shrink-0 items-center gap-3 rounded-[10px] px-3 font-medium transition ${
-        mobile ? "py-2 text-xs" : "py-3 text-sm"
-      } ${
-        active
-          ? "bg-[#e5f1eb] text-[#185c43]"
-          : "text-[#747b75] hover:bg-[#f8f9f6] hover:text-[#202521]"
-      }`}
-      href={href}
-    >
-      <Icon name={icon} />
-      {label}
-    </Link>
-  );
-}
-
 function Icon({
   name,
 }: {
-  name: "dashboard" | "category" | "menu" | "profile" | "plus" | "search" | "close" | "restaurant";
+  name: "menu" | "plus" | "search" | "close" | "edit" | "delete";
 }) {
   const paths = {
-    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
-    category: <><path d="M20 13 13 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3l7-7h7a2 2 0 0 1 2 2Z" /><circle cx="15.5" cy="8.5" r="1" /></>,
     menu: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
-    profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     plus: <path d="M12 5v14M5 12h14" />,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     close: <path d="m6 6 12 12M18 6 6 18" />,
-    restaurant: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
+    edit: <><path d="m15 5 4 4M4 20l4-.8L19 8a2.1 2.1 0 0 0-3-3L5 16l-1 4Z" /></>,
+    delete: <><path d="M4 7h16M10 11v6m4-6v6M6 7l1 14h10l1-14M9 7V4h6v3" /></>,
   };
 
   return (

@@ -14,7 +14,7 @@ function applyTheme(theme: CustomerTheme) {
 }
 
 export default function CustomerThemeToggle() {
-  const [theme, setTheme] = useState<CustomerTheme>("light");
+  const [theme, setTheme] = useState<CustomerTheme>("dark");
   const [storageError, setStorageError] = useState("");
 
   useEffect(() => {

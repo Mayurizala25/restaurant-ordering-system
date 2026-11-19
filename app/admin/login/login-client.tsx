@@ -7,13 +7,14 @@ import {
   fetchJsonWithTimeout,
   RequestTimeoutError,
 } from "../_lib/request-timeout";
+import { getAdminPostLoginPath } from "../_lib/post-login-path";
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [theme, setTheme] = useState<"dark" | "light">("light");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [themeError, setThemeError] = useState("");
 
   useEffect(() => {
@@ -42,22 +43,31 @@ export default function AdminLoginPage() {
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+    const form = event.currentTarget;
     event.preventDefault();
     setNotice("");
-    const formData = new FormData(event.currentTarget);
-    const email = String(formData.get("email") ?? "").trim().toLowerCase();
-    const password = String(formData.get("password") ?? "");
+    const emailField = form.elements.namedItem("email");
+    const passwordField = form.elements.namedItem("password");
+    const email =
+      emailField instanceof HTMLInputElement
+        ? emailField.value.trim().toLowerCase()
+        : "";
+    const password =
+      passwordField instanceof HTMLInputElement ? passwordField.value : "";
 
-    if (!email || !password) {
-      setNotice("Enter both your email address and password.");
-      event.currentTarget.querySelector<HTMLInputElement>(
-        !email ? "#email" : "#password",
-      )?.focus();
+    if (!email) {
+      setNotice("Enter your email address.");
+      form.querySelector<HTMLInputElement>("#email")?.focus();
+      return;
+    }
+    if (!password) {
+      setNotice("Enter your password.");
+      form.querySelector<HTMLInputElement>("#password")?.focus();
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setNotice("Enter a valid email address.");
-      event.currentTarget.querySelector<HTMLInputElement>("#email")?.focus();
+      form.querySelector<HTMLInputElement>("#email")?.focus();
       return;
     }
     setIsSubmitting(true);
@@ -85,7 +95,8 @@ export default function AdminLoginPage() {
         setNotice(errorMessage);
         return;
       }
-      router.replace("/admin/dashboard");
+      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+      router.replace(getAdminPostLoginPath(returnTo));
     } catch (cause) {
       setNotice(
         cause instanceof RequestTimeoutError
@@ -100,118 +111,97 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <main
-      className="vr-admin-login grid min-h-[100svh] bg-[#f5f6f2] text-[#202521] md:grid-cols-[minmax(0,1.05fr)_minmax(0,.95fr)]"
-      data-admin-theme={theme}
-    >
-      <section className="relative hidden min-h-screen flex-col justify-between overflow-hidden bg-[#174b39] px-12 py-10 text-white md:flex lg:px-16 xl:px-20">
-        <div className="relative z-10 flex items-center gap-3 font-semibold">
-          <Image
-            alt=""
-            className="size-10 rounded-xl"
-            height={40}
-            loading="eager"
-            src="/brand/virtual-rudra-logo.png?v=2"
-            unoptimized
-            width={40}
-          />
-          <span>Virtual Rudra</span>
-        </div>
-
-        <div className="relative z-10 max-w-lg">
-          <div className="mb-8 grid size-20 place-items-center rounded-3xl border border-white/15 bg-white/10">
+    <main className="vr-admin-login" data-admin-theme={theme}>
+      <header className="vr-admin-login-header">
+        <div className="vr-admin-login-brand">
+          <span className="vr-admin-login-brand-mark">
             <Image
               alt=""
-              className="size-11 rounded-xl"
-              height={44}
+              className="vr-admin-login-logo"
+              height={48}
               loading="eager"
               src="/brand/virtual-rudra-logo.png?v=2"
               unoptimized
-              width={44}
+              width={48}
             />
-          </div>
-          <h1 className="text-4xl font-semibold tracking-tight lg:text-5xl">
-            Made for memorable meals.
-          </h1>
-          <p className="mt-4 max-w-md text-base leading-7 text-white/75">
-            A considered workspace for running your restaurant.
-          </p>
+          </span>
+          <span className="vr-admin-login-brand-copy">
+            <strong>Virtual Rudra</strong>
+            <small>CULINARY OPS</small>
+          </span>
         </div>
-
-        <p className="relative z-10 text-xs tracking-[0.16em] text-white/65">
-          RESTAURANT MANAGEMENT · REIMAGINED
-        </p>
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute -bottom-64 -right-52 size-[34rem] rounded-full border border-white/10 shadow-[0_0_0_5rem_rgba(255,255,255,0.025),0_0_0_10rem_rgba(255,255,255,0.02)]"
-        />
-      </section>
-
-      <section className="relative flex min-h-[100svh] items-center justify-center px-5 py-8 sm:px-8 sm:py-12 lg:px-12">
-        <button
-          aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          className="vr-admin-login-theme-toggle absolute right-5 top-5 inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold transition"
-          onClick={toggleTheme}
-          type="button"
-        >
-          <svg
-            aria-hidden="true"
-            className="size-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="1.8"
+        <div className="vr-admin-login-header-actions">
+          <span className="vr-admin-login-security">
+            <span aria-hidden="true" />
+            Admin Secure
+          </span>
+          <button
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            className="vr-admin-login-theme-toggle"
+            onClick={toggleTheme}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            type="button"
           >
-            {theme === "dark" ? (
-              <>
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
-              </>
-            ) : (
-              <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
-            )}
-          </svg>
-          {theme === "dark" ? "Light mode" : "Dark mode"}
-        </button>
-        <div className="w-full max-w-[440px]">
-          <div className="mb-8 flex items-center gap-3 font-semibold md:hidden">
-            <Image
-              alt=""
-              className="size-10 rounded-xl object-contain"
-              height={40}
-              loading="eager"
-              src="/brand/virtual-rudra-logo.png?v=2"
-              unoptimized
-              width={40}
-            />
-            <span>Virtual Rudra</span>
+            <svg
+              aria-hidden="true"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            >
+              {theme === "dark" ? (
+                <>
+                  <circle cx="12" cy="12" r="4" />
+                  <path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" />
+                </>
+              ) : (
+                <path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" />
+              )}
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div className="vr-admin-login-main">
+        <section
+          aria-labelledby="admin-login-title"
+          className="vr-admin-login-card"
+        >
+          <div className="vr-admin-login-intro">
+            <p className="vr-admin-login-eyebrow">
+              ADMIN PORTAL <span aria-hidden="true">•</span> RESTRICTED
+            </p>
+            <h1 id="admin-login-title">Welcome back</h1>
+            <p>Sign in to manage kitchen operations, menu items, and dining orders.</p>
           </div>
 
-          <div className="vr-admin-login-card rounded-2xl border border-[#2a2e38] bg-[#15181e] p-6 shadow-[0_24px_70px_rgba(0,0,0,0.28)] sm:p-8">
-            <div className="mb-8">
-              <p className="mb-2 text-xs font-bold tracking-[0.16em] text-[#185c43]">
-                ADMIN PORTAL
-              </p>
-              <h2 className="text-3xl font-semibold tracking-tight">
-                Welcome back
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-[#747b75]">
-                Sign in to your restaurant workspace.
-              </p>
-            </div>
-
-            <form className="space-y-5" noValidate onSubmit={handleSubmit}>
-              <div className="space-y-2">
-                <label className="block text-sm font-medium" htmlFor="email">
-                  Email address
-                </label>
+          <form
+            className="vr-admin-login-form"
+            noValidate
+            onSubmit={handleSubmit}
+          >
+            <div className="vr-admin-login-field">
+              <label htmlFor="email">Email / Admin ID</label>
+              <div className="vr-admin-login-input-wrap">
+                <svg
+                  aria-hidden="true"
+                  className="vr-admin-login-input-icon"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
+                >
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="m4 7 8 6 8-6" />
+                </svg>
                 <input
                   autoCapitalize="none"
                   autoComplete="username"
                   autoCorrect="off"
-                  className="h-12 w-full rounded-xl border border-[#e5e8e2] bg-white px-4 text-base text-left leading-normal outline-none transition placeholder:text-[#9aa19b] focus:border-[#185c43] focus:ring-2 focus:ring-[#185c43]/15 disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isSubmitting}
                   id="email"
                   inputMode="email"
@@ -224,69 +214,122 @@ export default function AdminLoginPage() {
                   type="email"
                 />
               </div>
+            </div>
 
-              <div className="space-y-2">
-                <label className="block text-sm font-medium" htmlFor="password">
-                  Password
-                </label>
-                <div className="relative">
-                  <input
-                    autoCapitalize="none"
-                    autoComplete="current-password"
-                    className="h-12 w-full rounded-xl border border-[#e5e8e2] bg-white px-4 pr-12 text-base text-left leading-normal outline-none transition placeholder:text-[#9aa19b] focus:border-[#185c43] focus:ring-2 focus:ring-[#185c43]/15 disabled:cursor-not-allowed disabled:opacity-60"
-                    disabled={isSubmitting}
-                    id="password"
-                    name="password"
-                    onChange={() => setNotice("")}
-                    placeholder="Enter your password"
-                    required
-                    spellCheck={false}
-                    type={showPassword ? "text" : "password"}
-                  />
-                  <button
-                    aria-label={showPassword ? "Hide password" : "Show password"}
-                    aria-pressed={showPassword}
-                    className="absolute inset-y-0 right-0 grid w-12 place-items-center rounded-r-xl text-[#747b75] transition hover:text-[#185c43] focus-visible:outline-2 focus-visible:outline-offset-[-4px] focus-visible:outline-[#185c43]"
-                    onClick={() => setShowPassword((visible) => !visible)}
-                    title={showPassword ? "Hide password" : "Show password"}
-                    type="button"
-                  >
-                    <EyeIcon visible={showPassword} />
-                  </button>
-                </div>
-              </div>
-
-              <button
-                aria-busy={isSubmitting}
-                className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#185c43] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#124b36] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#185c43] disabled:cursor-wait disabled:opacity-75"
-                disabled={isSubmitting}
-                type="submit"
-              >
-                {isSubmitting ? "Signing in…" : "Sign in"}
-              </button>
-              {notice && (
-                <p
-                  aria-live="polite"
-                  className="text-sm leading-5 text-[#a3423c]"
-                  id="login-notice"
-                  role="alert"
+            <div className="vr-admin-login-field">
+              <label htmlFor="password">Password</label>
+              <div className="vr-admin-login-input-wrap">
+                <svg
+                  aria-hidden="true"
+                  className="vr-admin-login-input-icon"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.8"
                 >
-                  {notice}
-                </p>
-              )}
-            </form>
+                  <rect x="4" y="10" width="16" height="11" rx="2" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3m-4 4v3" />
+                </svg>
+                <input
+                  autoCapitalize="none"
+                  autoComplete="current-password"
+                  disabled={isSubmitting}
+                  id="password"
+                  name="password"
+                  onChange={() => setNotice("")}
+                  placeholder="Enter your password"
+                  required
+                  spellCheck={false}
+                  type={showPassword ? "text" : "password"}
+                />
+                <button
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  aria-pressed={showPassword}
+                  className="vr-admin-login-password-toggle"
+                  onClick={() => setShowPassword((visible) => !visible)}
+                  title={showPassword ? "Hide password" : "Show password"}
+                  type="button"
+                >
+                  <EyeIcon visible={showPassword} />
+                </button>
+              </div>
+            </div>
 
-            <p className="mt-7 text-center text-xs text-[#747b75]">
-              Protected admin access
-            </p>
-            {themeError && (
-              <p className="mt-3 text-center text-xs text-[#a3423c]" role="alert">
-                {themeError}
+            <button
+              aria-busy={isSubmitting}
+              className="vr-admin-login-submit"
+              disabled={isSubmitting}
+              type="submit"
+            >
+              {isSubmitting ? "Signing in…" : "Sign in to Dashboard"}
+              {!isSubmitting && (
+                <svg
+                  aria-hidden="true"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                >
+                  <path d="M5 12h14m-6-6 6 6-6 6" />
+                </svg>
+              )}
+            </button>
+            {notice && (
+              <p
+                aria-live="polite"
+                className="vr-admin-login-notice"
+                id="login-notice"
+                role="alert"
+              >
+                {notice}
               </p>
             )}
+          </form>
+
+          <div className="vr-admin-login-protected">
+            <svg
+              aria-hidden="true"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+            >
+              <rect x="4" y="10" width="16" height="11" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+            </svg>
+            <span>Protected admin access</span>
           </div>
-        </div>
-      </section>
+          {themeError && (
+            <p className="vr-admin-login-notice" role="alert">
+              {themeError}
+            </p>
+          )}
+        </section>
+
+        <section
+          aria-labelledby="admin-login-workspace-title"
+          className="vr-admin-login-workspace"
+        >
+          <h2 id="admin-login-workspace-title">WORKSPACE ACCESS</h2>
+          <div>
+            <span>Menu &amp; Items</span>
+            <span>Dining Orders</span>
+            <span>Kitchen Operations</span>
+          </div>
+        </section>
+      </div>
+
+      <footer className="vr-admin-login-footer">
+        <span>Virtual Rudra</span>
+        <span aria-hidden="true">•</span>
+        <span>Kitchen Management Portal</span>
+      </footer>
     </main>
   );
 }

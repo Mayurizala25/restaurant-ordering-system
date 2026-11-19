@@ -133,7 +133,7 @@ export default function OrderTrackingClient({ token }: { token: string }) {
   const isTerminal = order?.status === "served" || order?.status === "cancelled";
 
   return (
-    <main className="vr-menu-page" data-customer-theme="light">
+    <main className="vr-menu-page" data-customer-theme="dark">
       <div className="vr-menu-shell">
         <header className="vr-menu-header">
           <Link aria-label="Virtual Rudra menu home" className="vr-menu-brand" href="/menu">

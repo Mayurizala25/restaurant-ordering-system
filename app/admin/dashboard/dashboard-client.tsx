@@ -179,19 +179,16 @@ export function AdminDashboardClient() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [metricsError, setMetricsError] = useState("");
   const [metricsLoading, setMetricsLoading] = useState(true);
-  const [qrScans, setQrScans] = useState<number | null>(null);
-  const [qrScansError, setQrScansError] = useState("");
-  const [qrScansLoading, setQrScansLoading] = useState(true);
   const [orders, setOrders] = useState<AdminOrder[] | null>(null);
   const [ordersError, setOrdersError] = useState("");
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersLastUpdated, setOrdersLastUpdated] = useState<Date | null>(null);
+  const [showAllOrders, setShowAllOrders] = useState(false);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
   const [orderStatusErrors, setOrderStatusErrors] = useState<Record<string, string>>({});
   const orderFetchInFlight = useRef(false);
   const dataFetchInFlight = useRef(false);
   const metricsFetchInFlight = useRef(false);
-  const qrScansFetchInFlight = useRef(false);
   const loadControllers = useRef(new Set<AbortController>());
   const orderStatusRevision = useRef(0);
   const lastScrolledOrder = useRef("");
@@ -298,52 +295,6 @@ export function AdminDashboardClient() {
       loadControllers.current.delete(controller);
       metricsFetchInFlight.current = false;
       setMetricsLoading(false);
-    }
-  }, []);
-
-  const refreshQrScans = useCallback(async () => {
-    if (qrScansFetchInFlight.current) return;
-    qrScansFetchInFlight.current = true;
-    setQrScansLoading(true);
-    setQrScansError("");
-    const controller = new AbortController();
-    loadControllers.current.add(controller);
-    try {
-      const { response, payload } = await fetchJsonWithTimeout(
-        "/api/admin/qr-analytics",
-        { cache: "no-store", signal: controller.signal },
-        15_000,
-      );
-      if (!response.ok) {
-        const message =
-          isRecord(payload) && typeof payload.error === "string"
-            ? payload.error
-            : "Could not load QR scan statistics.";
-        throw new Error(message);
-      }
-      if (
-        !isRecord(payload) ||
-        typeof payload.totalScans !== "number" ||
-        !Number.isSafeInteger(payload.totalScans) ||
-        payload.totalScans < 0
-      ) {
-        throw new Error("QR scan statistics could not be read.");
-      }
-      setQrScans(payload.totalScans);
-    } catch (cause) {
-      if (!(cause instanceof RequestCancelledError)) {
-        setQrScansError(
-          cause instanceof RequestTimeoutError
-            ? "Loading QR scan statistics timed out. Try again."
-            : cause instanceof Error
-              ? cause.message
-              : "Could not load QR scan statistics.",
-        );
-      }
-    } finally {
-      loadControllers.current.delete(controller);
-      qrScansFetchInFlight.current = false;
-      setQrScansLoading(false);
     }
   }, []);
 
@@ -478,7 +429,6 @@ export function AdminDashboardClient() {
     const refreshDashboard = () => {
       void refreshData();
       void refreshMetrics();
-      void refreshQrScans();
       void refreshOrders();
     };
     const handleVisibility = () => {
@@ -496,17 +446,15 @@ export function AdminDashboardClient() {
       document.removeEventListener("visibilitychange", handleVisibility);
       for (const controller of controllers) controller.abort();
     };
-  }, [refreshData, refreshMetrics, refreshOrders, refreshQrScans]);
+  }, [refreshData, refreshMetrics, refreshOrders]);
 
   useEffect(() => {
     void refreshMetrics();
-    void refreshQrScans();
     const statsRefreshInterval = window.setInterval(() => {
       void refreshMetrics();
-      void refreshQrScans();
     }, 60_000);
     return () => window.clearInterval(statsRefreshInterval);
-  }, [refreshMetrics, refreshQrScans]);
+  }, [refreshMetrics]);
 
   useEffect(() => {
     const initialOrdersRefresh = window.setTimeout(() => {
@@ -530,12 +478,16 @@ export function AdminDashboardClient() {
 
     const orderId = targetId.slice("order-".length);
     if (!orders.some((order) => order.id === orderId)) return;
+    if (!showAllOrders) {
+      setShowAllOrders(true);
+      return;
+    }
     const target = document.getElementById(targetId);
     if (!target) return;
 
     target.scrollIntoView({ behavior: "smooth", block: "start" });
     lastScrolledOrder.current = targetId;
-  }, [orders]);
+  }, [orders, showAllOrders]);
 
   const categories = data?.categories ?? [];
   const items = data?.menuItems ?? [];
@@ -547,6 +499,10 @@ export function AdminDashboardClient() {
     );
   }
   const menuHighlights = items.slice(0, 5);
+  const visibleCategories = categories
+    .toSorted((left, right) => left.sortOrder - right.sortOrder)
+    .slice(0, 5);
+  const visibleOrders = showAllOrders ? orders ?? [] : (orders ?? []).slice(0, 5);
   const recentOrderStatuses = [
     { label: "Pending", statuses: ["pending"], color: "#d9922e" },
     {
@@ -623,28 +579,15 @@ export function AdminDashboardClient() {
       icon: "check",
       tone: "bg-[#e5f1eb] text-[#23704f]",
     },
-    {
-      label: "QR scans",
-      value: qrScans?.toLocaleString("en-IN") ?? null,
-      detail: qrScansLoading
-        ? "Loading scan totals…"
-        : qrScansError
-          ? "Could not load scan totals."
-          : qrScans === 0
-            ? "No scans recorded yet"
-            : "All-time table QR scans",
-      icon: "qr",
-      tone: "bg-[#e5f1eb] text-[#185c43]",
-    },
   ] as const;
 
   return (
     <div className="vr-dashboard-page">
-      <main className="vr-admin-management-page mx-auto w-full max-w-[1450px] px-4 py-4 sm:px-8 sm:py-7 md:px-10 md:py-8">
+      <main className="vr-admin-management-page vr-dashboard-main mx-auto w-full max-w-[1450px] px-4 py-4 sm:px-8 sm:py-7 md:px-10 md:py-8">
           <AdminPageHeading
-            description="Orders and performance for your restaurant."
+            description="Restaurant performance, menu health, and recent orders."
             eyebrow="YOUR RESTAURANT"
-            title="Virtual Rudra dashboard"
+            title="Dashboard overview"
           />
 
           {dataError && (
@@ -680,30 +623,33 @@ export function AdminDashboardClient() {
                 <p className="mt-4 text-2xl font-bold tracking-tight">
                   {card.value ?? "—"}
                 </p>
-                <p
-                  className={`mt-1 text-xs ${card.label === "QR scans" && qrScansError ? "text-[#a3423c]" : "text-[#747b75]"}`}
-                  role={card.label === "QR scans" && qrScansError ? "alert" : undefined}
-                >
+                <p className="mt-1 text-xs text-[#747b75]">
                   {card.detail}
                 </p>
               </article>
             ))}
           </section>
 
-          <section aria-label="Quick actions" className="vr-dashboard-quick-actions mb-6 grid gap-3 sm:grid-cols-2 sm:gap-4">
+          <section aria-label="Dashboard shortcuts" className="vr-dashboard-shortcuts">
             <QuickAction
               href="/admin/categories"
               icon="category"
-              title="Manage categories"
-              description="Add, edit, and organize your menu sections."
-              action="Open categories"
+              title="Categories"
             />
             <QuickAction
               href="/admin/menu-items"
               icon="menu"
-              title="Manage menu items"
-              description="Update dish details, prices, images, and availability."
-              action="Open menu items"
+              title="Menu items"
+            />
+            <QuickAction
+              href="/admin/orders"
+              icon="orders"
+              title="Order management"
+            />
+            <QuickAction
+              href="/admin/analytics"
+              icon="analytics"
+              title="Analytics"
             />
           </section>
 
@@ -716,7 +662,9 @@ export function AdminDashboardClient() {
               <div className="flex flex-col items-end gap-1 text-right">
                 {orders && orders.length > 0 && (
                   <span className="text-xs text-[#747b75]">
-                    {orders.length} {orders.length === 1 ? "order" : "orders"}
+                    {orders.length > 5
+                      ? `Showing ${visibleOrders.length} of ${orders.length}`
+                      : `${orders.length} ${orders.length === 1 ? "order" : "orders"}`}
                   </span>
                 )}
                 {ordersLastUpdated && (
@@ -749,20 +697,33 @@ export function AdminDashboardClient() {
                 No orders have been received yet.
               </p>
             ) : (
-              <ul className="divide-y divide-[#edf0eb]">
-                {orders?.map((order) => (
-                  <OrderRow
-                    isUpdating={updatingOrderId === order.id}
-                    key={order.id}
-                    onStatusChange={(status) => {
-                      void updateOrderStatus(order.id, status);
-                    }}
-                    order={order}
-                    statusError={orderStatusErrors[order.id]}
-                    updatesDisabled={updatingOrderId !== null}
-                  />
-                ))}
-              </ul>
+              <>
+                <ul className="divide-y divide-[#edf0eb]">
+                  {visibleOrders.map((order) => (
+                    <OrderRow
+                      isUpdating={updatingOrderId === order.id}
+                      key={order.id}
+                      onStatusChange={(status) => {
+                        void updateOrderStatus(order.id, status);
+                      }}
+                      order={order}
+                      statusError={orderStatusErrors[order.id]}
+                      updatesDisabled={updatingOrderId !== null}
+                    />
+                  ))}
+                </ul>
+                {orders && orders.length > 5 && (
+                  <div className="vr-dashboard-orders-more">
+                    <button
+                      aria-expanded={showAllOrders}
+                      onClick={() => setShowAllOrders((show) => !show)}
+                      type="button"
+                    >
+                      {showAllOrders ? "Show latest 5 orders" : `Show all ${orders.length} orders`}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </section>
 
@@ -795,15 +756,13 @@ export function AdminDashboardClient() {
                 />
               ) : (
                 <ul className="divide-y divide-[#edf0eb]">
-                  {categories
-                    .toSorted((left, right) => left.sortOrder - right.sortOrder)
-                    .map((category) => (
-                      <CategoryRow
-                        category={category}
-                        itemCount={itemCountByCategory.get(category.id) ?? 0}
-                        key={category.id}
-                      />
-                    ))}
+                  {visibleCategories.map((category) => (
+                    <CategoryRow
+                      category={category}
+                      itemCount={itemCountByCategory.get(category.id) ?? 0}
+                      key={category.id}
+                    />
+                  ))}
                 </ul>
               )}
             </section>
@@ -849,14 +808,14 @@ export function AdminDashboardClient() {
 
             <section
               aria-labelledby="recent-order-status-heading"
-              className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+              className="vr-dashboard-order-mix overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
             >
               <div className="border-b border-[#e5e8e2] px-5 py-4">
                 <h2 className="font-bold" id="recent-order-status-heading">
                   Recent order mix
                 </h2>
                 <p className="mt-1 text-xs text-[#747b75]">
-                  Status of the latest {recentOrderCount} orders
+                  Status breakdown across all {recentOrderCount} orders
                 </p>
               </div>
               {ordersLoading && orders === null ? (
@@ -1073,27 +1032,22 @@ function QuickAction({
   href,
   icon,
   title,
-  description,
-  action,
 }: {
   href: string;
-  icon: "category" | "menu";
+  icon: "category" | "menu" | "orders" | "analytics";
   title: string;
-  description: string;
-  action: string;
 }) {
   return (
     <Link
-      className="group flex items-center gap-4 rounded-[14px] border border-[#dce7dd] bg-[#edf5ef] p-5 transition hover:border-[#185c43]/40 hover:bg-[#e7f1e9] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#185c43]"
+      className="vr-dashboard-shortcut"
       href={href}
     >
-      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-[#185c43] shadow-sm">
+      <span className="vr-dashboard-shortcut-icon">
         <Icon name={icon} />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block font-semibold text-[#202521]">{title}</span>
-        <span className="mt-1 block text-xs leading-5 text-[#747b75]">{description}</span>
-        <span className="mt-2 block text-xs font-semibold text-[#185c43]">{action} →</span>
+      <span className="vr-dashboard-shortcut-label">{title}</span>
+      <span aria-hidden="true" className="vr-dashboard-shortcut-arrow">
+        →
       </span>
     </Link>
   );
@@ -1127,20 +1081,19 @@ function EmptyState({
 function Icon({
   name,
 }: {
-  name: "dashboard" | "category" | "menu" | "profile" | "orders" | "revenue" | "clock" | "restaurant" | "check" | "pause" | "qr";
+  name: "dashboard" | "category" | "menu" | "orders" | "revenue" | "clock" | "restaurant" | "check" | "pause" | "analytics";
 }) {
   const paths = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     category: <><path d="M20 13 13 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3l7-7h7a2 2 0 0 1 2 2Z" /><circle cx="15.5" cy="8.5" r="1" /></>,
     menu: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
-    profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     orders: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
     revenue: <><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" /></>,
     clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
     restaurant: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
     check: <><path d="m5 12 4 4L19 6" /></>,
     pause: <><path d="M8 5v14M16 5v14" /></>,
-    qr: <><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z" /><path d="M14 14h3v3h-3zM20 14v2M17 20h4M20 18v3" /></>,
+    analytics: <><path d="M4 19V5m0 14h17" /><path d="m7 15 4-4 3 2 5-6" /><path d="M19 7v4h-4" /></>,
   };
 
   return (

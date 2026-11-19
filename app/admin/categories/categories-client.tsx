@@ -1,10 +1,8 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DemoCategory, DemoData } from "../_lib/demo-data";
 import { loadDemoData, saveDemoData } from "../_lib/demo-storage";
-import { SignOutButton } from "../_lib/admin-provider";
 import { AdminPageHeading } from "../_components/admin-page";
 import {
   createTimeoutSignal,
@@ -20,13 +18,6 @@ type CategoryForm = {
   isActive: boolean;
   imageUrl: string;
 };
-
-const navigation = [
-  { label: "Dashboard", href: "/admin/dashboard", icon: "dashboard" },
-  { label: "Menu Categories", href: "/admin/categories", icon: "category", active: true },
-  { label: "Menu Items", href: "/admin/menu-items", icon: "menu" },
-  { label: "Profile", href: "/admin/profile", icon: "profile" },
-] as const;
 
 const blankForm: CategoryForm = {
   name: "",
@@ -76,6 +67,7 @@ export default function AdminCategoriesClient() {
   const [saveError, setSaveError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [search, setSearch] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<"all" | "active" | "empty" | "inactive">("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CategoryForm>(blankForm);
@@ -193,17 +185,32 @@ export default function AdminCategoriesClient() {
     }
     return counts;
   }, [items]);
+  const activeCount = categories.filter((category) => category.isActive).length;
+  const emptyCount = categories.filter((category) => !categoryCounts.has(category.id)).length;
+  const linkedItemsCount = categories.reduce(
+    (count, category) => count + (categoryCounts.get(category.id) ?? 0),
+    0,
+  );
 
   const filteredCategories = useMemo(() => {
     const query = search.trim().toLowerCase();
     return categories
       .filter(
-        (category) =>
-          category.name.toLowerCase().includes(query) ||
-          category.description.toLowerCase().includes(query),
+        (category) => {
+          const matchesSearch =
+            category.name.toLowerCase().includes(query) ||
+            category.description.toLowerCase().includes(query);
+          const itemCount = categoryCounts.get(category.id) ?? 0;
+          const matchesFilter =
+            categoryFilter === "all" ||
+            (categoryFilter === "active" && category.isActive) ||
+            (categoryFilter === "inactive" && !category.isActive) ||
+            (categoryFilter === "empty" && itemCount === 0);
+          return matchesSearch && matchesFilter;
+        },
       )
       .toSorted((left, right) => left.sortOrder - right.sortOrder);
-  }, [categories, search]);
+  }, [categories, categoryCounts, categoryFilter, search]);
 
   function openAddModal() {
     setEditingId(null);
@@ -443,83 +450,68 @@ export default function AdminCategoriesClient() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f5f6f2] text-[#202521] md:flex">
-      <aside className="hidden w-[248px] shrink-0 border-r border-[#e5e8e2] bg-white px-4 py-6 md:flex md:flex-col">
-        <Brand />
-        <p className="mb-3 mt-10 px-3 text-[10px] font-bold tracking-[0.16em] text-[#929a93]">
-          WORKSPACE
-        </p>
-        <nav aria-label="Admin navigation" className="space-y-1">
-          {navigation.map((item) => <NavigationLink key={item.label} {...item} />)}
-        </nav>
-        <AdminIdentity />
-      </aside>
+    <>
+      <main className="vr-admin-categories-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-4 py-5 sm:px-8 sm:py-7 md:px-10">
+        <AdminPageHeading
+          description="Manage menu categories, visibility, and item assignments."
+          eyebrow="MENU MANAGEMENT"
+          title="Categories"
+        >
+          <button
+            className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#185c43] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#124b36] disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!data || isSaving || processingCategoryId !== null}
+            onClick={openAddModal}
+            type="button"
+          >
+            <Icon name="plus" />
+            Add category
+          </button>
+        </AdminPageHeading>
 
-      <div className="min-w-0 flex-1">
-        <header className="border-b border-[#e5e8e2] bg-white px-5 py-4 sm:px-8 md:px-10">
-          <div className="flex items-center justify-between gap-3">
-            <div className="md:hidden"><Brand /></div>
-            <p className="hidden text-sm font-medium text-[#535b55] md:block">Menu management</p>
-            <SignOutButton />
+        {(loadError || saveError || feedback) && (
+          <div
+            aria-live="polite"
+            className={`mb-5 rounded-xl border p-4 text-sm ${
+              loadError || saveError
+                ? "border-[#f1d8d5] bg-[#fff5f4] text-[#a3423c]"
+                : "border-[#d7e8dc] bg-[#edf5ef] text-[#185c43]"
+            }`}
+            role={loadError || saveError ? "alert" : "status"}
+          >
+            {loadError || saveError || feedback}
+            {loadError && (
+              <button
+                className="ml-3 font-semibold underline"
+                disabled={loading}
+                onClick={() => void refreshData()}
+                type="button"
+              >
+                Try again
+              </button>
+            )}
           </div>
-          <nav aria-label="Admin navigation" className="mt-4 flex gap-2 overflow-x-auto md:hidden">
-            {navigation.map((item) => <NavigationLink key={item.label} {...item} mobile />)}
-          </nav>
-        </header>
+        )}
 
-        <main className="vr-admin-categories-page vr-admin-management-page mx-auto w-full max-w-[1450px] px-5 py-7 sm:px-8 sm:py-9 md:px-10">
-          <AdminPageHeading
-            description="Organize the menu and control which categories are visible."
-            eyebrow="MENU MANAGEMENT"
-            title="Menu categories"
-          >
-            <button
-              className="inline-flex h-10 items-center gap-2 rounded-[10px] bg-[#185c43] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#124b36] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!data || isSaving || processingCategoryId !== null}
-              onClick={openAddModal}
-              type="button"
-            >
-              <Icon name="plus" />
-              Add category
-            </button>
-          </AdminPageHeading>
+        <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <SummaryCard label="Total categories" value={categories.length} detail="Menu sections" />
+          <SummaryCard label="Active" value={activeCount} detail="Visible to guests" />
+          <SummaryCard label="Empty" value={emptyCount} detail="No linked menu items" />
+          <SummaryCard label="Linked items" value={linkedItemsCount} detail="Across categories" />
+        </div>
 
-          {(loadError || saveError || feedback) && (
-            <div
-              aria-live="polite"
-              className={`mb-5 rounded-xl border p-4 text-sm ${
-                loadError || saveError
-                  ? "border-[#f1d8d5] bg-[#fff5f4] text-[#a3423c]"
-                  : "border-[#d7e8dc] bg-[#edf5ef] text-[#185c43]"
-              }`}
-              role={loadError || saveError ? "alert" : "status"}
-            >
-              {loadError || saveError || feedback}
-              {loadError && (
-                <button
-                  className="ml-3 font-semibold underline"
-                  disabled={loading}
-                  onClick={() => void refreshData()}
-                  type="button"
-                >
-                  Try again
-                </button>
-              )}
-            </div>
-          )}
-
-          <section
-            aria-busy={loading}
-            className="overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
-          >
-            <div className="flex flex-col gap-4 border-b border-[#e5e8e2] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <section
+          aria-busy={loading}
+          className="rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+        >
+          <div className="border-b border-[#e5e8e2] p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <h2 className="font-bold">All categories</h2>
                 <p className="mt-1 text-xs text-[#747b75]">
-                  {categories.length} categories · {categories.filter((category) => category.isActive).length} active
+                  Showing {filteredCategories.length} of {categories.length} · ordered by priority
                 </p>
               </div>
-              <label className="relative block w-full sm:max-w-xs">
+              <label className="relative block w-full lg:max-w-sm">
                 <span className="sr-only">Search categories</span>
                 <span className="pointer-events-none absolute inset-y-0 left-3 grid place-items-center text-[#747b75]">
                   <Icon name="search" />
@@ -533,117 +525,147 @@ export default function AdminCategoriesClient() {
                 />
               </label>
             </div>
+            <div
+              aria-label="Filter categories"
+              className="mt-4 flex flex-wrap gap-2"
+              role="group"
+            >
+              {([
+                ["all", "All", categories.length],
+                ["active", "Active", activeCount],
+                ["empty", "Empty", emptyCount],
+                ["inactive", "Inactive", categories.length - activeCount],
+              ] as const).map(([filter, label, count]) => (
+                <button
+                  aria-pressed={categoryFilter === filter}
+                  className={`shrink-0 rounded-full border px-3.5 py-2 text-xs font-semibold transition ${
+                    categoryFilter === filter
+                      ? "border-[#185c43] bg-[#185c43] text-white"
+                      : "border-[#e5e8e2] bg-white text-[#535b55] hover:border-[#185c43] hover:text-[#185c43]"
+                  }`}
+                  key={filter}
+                  onClick={() => setCategoryFilter(filter)}
+                  type="button"
+                >
+                  {label} <span className="ml-1 opacity-75">{count}</span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-            {!data ? (
-              <p className="px-6 py-10 text-center text-sm text-[#747b75]">
-                {loading
-                  ? "Loading categories…"
-                  : loadError || "Category data could not be loaded."}
-              </p>
-            ) : filteredCategories.length > 0 ? (
-              <div className="vr-admin-categories-table-wrap overflow-x-auto">
-                <table className="vr-admin-categories-table w-full min-w-[690px] text-left text-sm">
-                  <thead className="bg-[#f8f9f6] text-[10px] font-semibold uppercase tracking-wide text-[#747b75]">
-                    <tr>
-                      <th className="px-5 py-3 font-semibold sm:px-6">Category</th>
-                      <th className="px-4 py-3 font-semibold">Menu items</th>
-                      <th className="px-4 py-3 font-semibold">Order</th>
-                      <th className="px-4 py-3 font-semibold">Status</th>
-                      <th className="px-5 py-3 text-right font-semibold sm:px-6">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#edf0eb]">
-                    {filteredCategories.map((category) => {
-                      const count = categoryCounts.get(category.id) ?? 0;
-                      return (
-                        <tr className="align-top hover:bg-[#fbfcfa]" key={category.id}>
-                          <td className="vr-admin-category-cell px-5 py-4 sm:px-6">
-                            <div className="flex items-start gap-3">
-                              <CategoryImage category={category} />
-                              <div className="min-w-0">
-                                <p className="font-semibold">{category.name}</p>
-                                <p className="mt-1 max-w-md text-xs leading-5 text-[#747b75]">
-                                  {category.description || "No description"}
-                                </p>
-                              </div>
-                            </div>
-                          </td>
-                          <td data-label="Menu items" className="px-4 py-4 text-[#747b75]">
-                            {count} {count === 1 ? "item" : "items"}
-                          </td>
-                          <td data-label="Order" className="px-4 py-4 text-[#535b55]">{category.sortOrder}</td>
-                          <td data-label="Status" className="px-4 py-4">
-                            <button
-                              aria-label={`${category.isActive ? "Deactivate" : "Activate"} ${category.name}`}
-                              aria-pressed={category.isActive}
-                              className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                                category.isActive
-                                  ? "bg-[#e3f3ea] text-[#20704d]"
-                                  : "bg-[#edf0ed] text-[#68716a]"
-                              }`}
-                              disabled={processingCategoryId !== null}
-                              onClick={() => toggleActive(category)}
-                              type="button"
-                            >
-                              {category.isActive ? "Active" : "Inactive"}
-                            </button>
-                          </td>
-                          <td data-label="Actions" className="px-5 py-4 sm:px-6">
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <button
-                                className="rounded-lg border border-[#e5e8e2] px-3 py-1.5 text-xs font-medium text-[#535b55] hover:border-[#185c43] hover:text-[#185c43]"
-                                disabled={processingCategoryId !== null || isSaving}
-                                onClick={() => openEditModal(category)}
-                                type="button"
-                              >
-                                Edit
-                              </button>
-                              <button
-                                className="rounded-lg border border-[#f1d8d5] px-3 py-1.5 text-xs font-medium text-[#a3423c] hover:bg-[#fff5f4]"
-                                disabled={processingCategoryId !== null || isSaving}
-                                onClick={() => deleteCategory(category)}
-                                type="button"
-                              >
-                                Delete
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="px-6 py-14 text-center">
-                <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#e5f1eb] text-[#185c43]">
-                  <Icon name="category" />
-                </span>
-                <h3 className="mt-4 text-sm font-semibold">
-                  {search ? "No matching categories" : "No categories yet"}
-                </h3>
-                <p className="mt-1 text-sm text-[#747b75]">
-                  {search
-                    ? "Try a different search term."
-                    : "Add a category to start organizing your restaurant menu."}
-                </p>
-                {!search && (
-                  <button
-                    className="mt-4 rounded-lg bg-[#185c43] px-4 py-2 text-xs font-semibold text-white hover:bg-[#124b36]"
-                    onClick={openAddModal}
-                    type="button"
+          {!data ? (
+            <p className="px-6 py-10 text-center text-sm text-[#747b75]">
+              {loading ? "Loading categories…" : loadError || "Category data could not be loaded."}
+            </p>
+          ) : filteredCategories.length > 0 ? (
+            <div className="grid gap-3 p-3 sm:grid-cols-2 sm:gap-4 sm:p-4 xl:grid-cols-2">
+              {filteredCategories.map((category) => {
+                const count = categoryCounts.get(category.id) ?? 0;
+                return (
+                  <article
+                    className="min-w-0 rounded-xl border border-[#e5e8e2] bg-white p-3 transition hover:shadow-[0_5px_18px_rgba(26,45,35,0.06)] sm:p-4"
+                    key={category.id}
                   >
-                    Add your first category
-                  </button>
-                )}
-              </div>
-            )}
-          </section>
-          <p className="mt-5 text-center text-xs text-[#929a93]">
-            Category changes are saved to Supabase.
-          </p>
-        </main>
-      </div>
+                    <div className="flex min-w-0 items-start gap-3">
+                      <CategoryImage category={category} />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-sm font-bold">{category.name}</h3>
+                          <span
+                            className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                              category.isActive
+                                ? "bg-[#e3f3ea] text-[#20704d]"
+                                : "bg-[#edf0ed] text-[#68716a]"
+                            }`}
+                          >
+                            {category.isActive ? "Active" : "Inactive"}
+                          </span>
+                          {count === 0 && (
+                            <span className="rounded-full bg-[#fff5f4] px-2 py-0.5 text-[10px] font-semibold text-[#a3423c]">
+                              Empty
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#747b75]">
+                          {category.description || "No description"}
+                        </p>
+                      </div>
+                      <button
+                        aria-label={`${category.isActive ? "Deactivate" : "Activate"} ${category.name}`}
+                        aria-checked={category.isActive}
+                        className={`relative mt-0.5 inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                          category.isActive ? "bg-[#185c43]" : "bg-[#b8bdc7]"
+                        }`}
+                        disabled={processingCategoryId !== null}
+                        onClick={() => toggleActive(category)}
+                        role="switch"
+                        type="button"
+                      >
+                        <span
+                          className={`size-4 rounded-full bg-white shadow transition ${
+                            category.isActive ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#edf0eb] pt-3 text-xs text-[#747b75]">
+                      <span>
+                        <strong className="text-[#202521]">{count}</strong>{" "}
+                        {count === 1 ? "menu item" : "menu items"}
+                      </span>
+                      <span>Priority {category.sortOrder}</span>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        className="min-h-9 flex-1 rounded-lg border border-[#e5e8e2] px-3 text-xs font-semibold text-[#535b55] hover:border-[#185c43] hover:text-[#185c43] disabled:opacity-50"
+                        disabled={processingCategoryId !== null || isSaving}
+                        onClick={() => openEditModal(category)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="min-h-9 flex-1 rounded-lg border border-[#f1d8d5] px-3 text-xs font-semibold text-[#a3423c] hover:bg-[#fff5f4] disabled:opacity-50"
+                        disabled={processingCategoryId !== null || isSaving}
+                        onClick={() => deleteCategory(category)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="px-6 py-12 text-center">
+              <span className="mx-auto grid size-11 place-items-center rounded-xl bg-[#e5f1eb] text-[#185c43]">
+                <Icon name="category" />
+              </span>
+              <h3 className="mt-4 text-sm font-semibold">
+                {search || categoryFilter !== "all" ? "No matching categories" : "No categories yet"}
+              </h3>
+              <p className="mt-1 text-sm text-[#747b75]">
+                {search || categoryFilter !== "all"
+                  ? "Adjust your search or filters and try again."
+                  : "Add a category to start organizing your restaurant menu."}
+              </p>
+              {!search && categoryFilter === "all" && (
+                <button
+                  className="mt-4 rounded-lg bg-[#185c43] px-4 py-2 text-xs font-semibold text-white hover:bg-[#124b36]"
+                  onClick={openAddModal}
+                  type="button"
+                >
+                  Add your first category
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+        <p className="mt-4 text-center text-xs text-[#929a93]">
+          Category changes are saved to Supabase and reflected in the menu.
+        </p>
+      </main>
 
       {isModalOpen && (
         <CategoryModal
@@ -659,7 +681,7 @@ export default function AdminCategoriesClient() {
           onSave={saveCategory}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -808,11 +830,21 @@ function CategoryModal({
   );
 }
 
+function SummaryCard({ label, value, detail }: { label: string; value: number; detail: string }) {
+  return (
+    <article className="min-w-0 rounded-xl border border-[#e5e8e2] bg-white p-3 shadow-[0_4px_14px_rgba(26,45,35,0.03)] sm:p-4">
+      <p className="truncate text-[11px] font-medium text-[#747b75]">{label}</p>
+      <p className="mt-1 text-2xl font-bold tracking-tight">{value}</p>
+      <p className="mt-0.5 truncate text-[10px] text-[#929a93]">{detail}</p>
+    </article>
+  );
+}
+
 function CategoryImage({ category }: { category: DemoCategory }) {
   return (
     <span
       aria-label={`${category.name} image`}
-      className="grid size-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-br from-[#eef3e8] to-[#f5e9d4] text-[#185c43]"
+      className="grid size-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-gradient-to-br from-[#eef3e8] to-[#f5e9d4] text-[#185c43]"
       role="img"
       style={
         category.imageUrl
@@ -829,73 +861,13 @@ function CategoryImage({ category }: { category: DemoCategory }) {
   );
 }
 
-function Brand() {
-  return (
-    <Link className="flex items-center gap-3 font-bold text-[#202521]" href="/admin/dashboard">
-      <span className="grid size-9 place-items-center rounded-xl bg-[#185c43] text-white">
-        <Icon name="restaurant" />
-      </span>
-      <span>Virtual Rudra</span>
-    </Link>
-  );
-}
-
-function AdminIdentity() {
-  return (
-    <div className="mt-auto border-t border-[#e5e8e2] pt-5">
-      <div className="flex items-center gap-3 px-2">
-        <span className="grid size-9 place-items-center rounded-xl bg-[#e5f1eb] text-xs font-bold text-[#185c43]">VR</span>
-        <span>
-          <span className="block text-sm font-semibold">Virtual Rudra</span>
-          <span className="block text-xs text-[#747b75]">Restaurant admin · demo</span>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function NavigationLink({
-  label,
-  href,
-  icon,
-  active = false,
-  mobile = false,
-}: {
-  label: string;
-  href: string;
-  icon: "dashboard" | "category" | "menu" | "profile";
-  active?: boolean;
-  mobile?: boolean;
-}) {
-  return (
-    <Link
-      aria-current={active ? "page" : undefined}
-      className={`flex shrink-0 items-center gap-3 rounded-[10px] px-3 font-medium transition ${
-        mobile ? "py-2 text-xs" : "py-3 text-sm"
-      } ${
-        active
-          ? "bg-[#e5f1eb] text-[#185c43]"
-          : "text-[#747b75] hover:bg-[#f8f9f6] hover:text-[#202521]"
-      }`}
-      href={href}
-    >
-      <Icon name={icon} />
-      {label}
-    </Link>
-  );
-}
-
 function Icon({
   name,
 }: {
-  name: "dashboard" | "category" | "menu" | "profile" | "restaurant" | "plus" | "search" | "close";
+  name: "category" | "plus" | "search" | "close";
 }) {
   const paths = {
-    dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
     category: <><path d="M20 13 13 20a2 2 0 0 1-3 0l-6-6a2 2 0 0 1 0-3l7-7h7a2 2 0 0 1 2 2Z" /><circle cx="15.5" cy="8.5" r="1" /></>,
-    menu: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
-    profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
-    restaurant: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
     plus: <><path d="M12 5v14M5 12h14" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
     close: <><path d="m18 6-12 12M6 6l12 12" /></>,

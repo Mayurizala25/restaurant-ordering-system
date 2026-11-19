@@ -85,7 +85,7 @@ export async function POST(request: Request) {
   url.searchParams.set("tracking_token_hash", `eq.${tokenHash}`);
   url.searchParams.set(
     "select",
-    "id,status,total_inr,created_at,restaurant_tables(table_number),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr)",
+    "id,status,total_inr,created_at,customer_name,restaurant_tables(table_number),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr)",
   );
   url.searchParams.set("limit", "1");
 
@@ -119,6 +119,9 @@ export async function POST(request: Request) {
     !UUID_PATTERN.test(order.id) ||
     typeof order.status !== "string" ||
     !ORDER_STATUSES.includes(order.status as (typeof ORDER_STATUSES)[number]) ||
+    typeof order.created_at !== "string" ||
+    !Number.isFinite(Date.parse(order.created_at)) ||
+    typeof order.customer_name !== "string" ||
     (typeof order.total_inr !== "string" &&
       typeof order.total_inr !== "number") ||
     !Number.isFinite(Number(order.total_inr)) ||
@@ -162,6 +165,8 @@ export async function POST(request: Request) {
       order: {
         orderNumber: order.id,
         status: order.status,
+        createdAt: order.created_at,
+        customerName: order.customer_name,
         total: Number(order.total_inr),
         tableNumber: order.restaurant_tables.table_number,
         items,

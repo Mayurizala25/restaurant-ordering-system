@@ -4,18 +4,20 @@
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "dev:kitchen": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev-expo-kitchen.ps1",
+    "dev:staging": "node scripts/dev-staging.mjs",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "lint": "eslint"
   },
   "dependencies": {
-    "next": "16.4.3",
+    "next": "16.4.6",
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@tailwindcss/turbopack": "^4",
+    "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",

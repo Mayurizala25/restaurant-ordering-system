@@ -155,7 +155,7 @@ export async function GET() {
   ordersUrl.searchParams.set("restaurant_id", `eq.${restaurantId}`);
   ordersUrl.searchParams.set(
     "select",
-    "id,status,total_inr,created_at,restaurant_tables(table_number),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr)",
+    "id,status,total_inr,created_at,restaurant_tables(table_number,name),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr,menu_item:restaurant_menu_items(image_url))",
   );
   ordersUrl.searchParams.set("order", "created_at.desc");
 
@@ -217,7 +217,7 @@ export async function GET() {
   }
 
   return Response.json(
-    { orders, restaurantId },
+    { orders, restaurantId, sessionType: "admin" },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
@@ -293,7 +293,6 @@ export async function PATCH(request: Request) {
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
   }
-
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const restaurantId = process.env.SUPABASE_RESTAURANT_ID;

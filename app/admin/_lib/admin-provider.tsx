@@ -16,6 +16,7 @@ import {
   RequestCancelledError,
   RequestTimeoutError,
 } from "./request-timeout";
+import { getAdminPostLoginPath } from "./post-login-path";
 
 type AdminNotification = {
   orderId: string;
@@ -263,7 +264,8 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
       if (!validSession && !checkError && pathname !== "/admin/login") {
         router.replace("/admin/login");
       } else if (validSession && pathname === "/admin/login") {
-        router.replace("/admin/dashboard");
+        const returnTo = new URLSearchParams(window.location.search).get("returnTo");
+        router.replace(getAdminPostLoginPath(returnTo));
       }
     };
 
@@ -370,12 +372,12 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 
 const adminNavigation = [
   { label: "Dashboard", href: "/admin/dashboard", icon: "dashboard" },
+  { label: "Orders", href: "/admin/orders", icon: "orders" },
   { label: "Categories", href: "/admin/categories", icon: "categories" },
   { label: "Menu Items", href: "/admin/menu-items", icon: "menu" },
   { label: "Tables", href: "/admin/tables", icon: "tables" },
   { label: "Feedback", href: "/admin/feedback", icon: "feedback" },
   { label: "Analytics", href: "/admin/analytics", icon: "analytics" },
-  { label: "Profile", href: "/admin/profile", icon: "profile" },
 ] as const;
 
 function AdminShell({ children }: { children: React.ReactNode }) {
@@ -387,7 +389,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     setNotificationsRead,
   } = useAdmin();
   const [logoutError, setLogoutError] = useState("");
-  const [theme, setTheme] = useState<"dark" | "light">("light");
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
@@ -420,8 +422,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     return () => window.cancelAnimationFrame(frame);
   }, []);
 
-  function toggleTheme() {
-    const nextTheme = theme === "dark" ? "light" : "dark";
+  const applyTheme = useCallback((nextTheme: "dark" | "light") => {
     setTheme(nextTheme);
     setLogoutError("");
     try {
@@ -429,7 +430,28 @@ function AdminShell({ children }: { children: React.ReactNode }) {
     } catch {
       setLogoutError("Theme changed, but could not be saved for your next visit.");
     }
-  }
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    applyTheme(theme === "dark" ? "light" : "dark");
+  }, [applyTheme, theme]);
+
+  useEffect(() => {
+    function handleExpoThemeToggle(event: Event) {
+      if (!(event instanceof CustomEvent) || !isRecord(event.detail)) return;
+      const requestedTheme = event.detail.theme;
+      if (requestedTheme !== "dark" && requestedTheme !== "light") return;
+      event.preventDefault();
+      applyTheme(requestedTheme);
+    }
+
+    window.addEventListener("virtual-rudra:toggle-admin-theme", handleExpoThemeToggle);
+    return () =>
+      window.removeEventListener(
+        "virtual-rudra:toggle-admin-theme",
+        handleExpoThemeToggle,
+      );
+  }, [applyTheme]);
 
   async function handleSignOut() {
     setLogoutError("");
@@ -579,12 +601,12 @@ function AdminNavIcon({
 }: {
   name:
     | "dashboard"
+    | "orders"
     | "categories"
     | "menu"
     | "tables"
     | "feedback"
     | "analytics"
-    | "profile"
     | "logout"
     | "sun"
     | "moon"
@@ -592,12 +614,12 @@ function AdminNavIcon({
 }) {
   const paths = {
     dashboard: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+    orders: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
     categories: <><path d="M4 5h16M4 12h16M4 19h16" /><circle cx="8" cy="5" r="1.5" /><circle cx="15" cy="12" r="1.5" /><circle cx="10" cy="19" r="1.5" /></>,
     menu: <><path d="M4 15h16M6 15a6 6 0 0 1 12 0M3 19h18M12 7V5" /></>,
     tables: <><rect x="3" y="4" width="18" height="7" rx="2" /><path d="M7 11v9m10-9v9M3 16h18" /></>,
     feedback: <><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H7l-4 2v-5.5A7.5 7.5 0 1 1 20 11.5Z" /><path d="m8 11 2.5 2.5L16 8" /></>,
     analytics: <><path d="M4 19V5m0 14h17" /><path d="m7 15 4-4 3 2 6-7" /></>,
-    profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     logout: <><path d="M10 17l5-5-5-5M15 12H3" /><path d="M12 3h7a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-7" /></>,
     sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></>,
     moon: <><path d="M20.9 13A9 9 0 0 1 11 3.1 9 9 0 1 0 20.9 13Z" /></>,

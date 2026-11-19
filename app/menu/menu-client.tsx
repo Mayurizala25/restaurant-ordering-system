@@ -46,7 +46,15 @@ type MenuData = {
 };
 
 type CartLine = { itemId: string; quantity: number };
+type HeroSlide = {
+  id: string;
+  kicker: string;
+  title: string;
+  description: string;
+  imageUrl: string;
+};
 type StorefrontPage = "menu" | "cart" | "checkout" | "thank-you";
+type MenuFilter = "all" | "vegetarian" | "special";
 type OrderConfirmation = {
   id: string;
   trackingToken: string;
@@ -213,13 +221,34 @@ function createOrderRequestId(): string {
 
 async function createOrderRequestKey(request: Omit<OrderRequest, "requestId">) {
   const serializedRequest = JSON.stringify(request);
-  const digest = await globalThis.crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(serializedRequest),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
+  const subtle = globalThis.crypto?.subtle;
+  if (typeof subtle?.digest === "function" && typeof TextEncoder !== "undefined") {
+    const digest = await subtle.digest(
+      "SHA-256",
+      new TextEncoder().encode(serializedRequest),
+    );
+    return Array.from(new Uint8Array(digest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join("");
+  }
+
+  // This local-only key matches retries; the API still validates a random UUID.
+  const hash = (seed: number, multiplier: number) => {
+    let value = seed;
+    for (let index = 0; index < serializedRequest.length; index += 1) {
+      value = Math.imul(
+        value ^ serializedRequest.charCodeAt(index),
+        multiplier,
+      );
+    }
+    return (value >>> 0).toString(16).padStart(8, "0");
+  };
+  return [
+    hash(0x811c9dc5, 0x01000193),
+    hash(0x9e3779b9, 0x85ebca6b),
+    hash(0x243f6a88, 0xc2b2ae35),
+    hash(0xb7e15162, 0x27d4eb2f),
+  ].join("");
 }
 
 function getPendingOrderRequest(key: string) {
@@ -264,8 +293,13 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const [menuRetryCount, setMenuRetryCount] = useState(0);
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
+  const [menuFilter, setMenuFilter] = useState<MenuFilter>("all");
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [heroSlideIndex, setHeroSlideIndex] = useState(0);
   const [selectedDish, setSelectedDish] = useState<DemoMenuItem | null>(null);
   const dishDetailsRef = useRef<HTMLDialogElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const heroPointerStart = useRef<number | null>(null);
   const [tableId, setTableId] = useState<string | null>(null);
   const [qrTableNumber, setQrTableNumber] = useState<number | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
@@ -474,6 +508,12 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
         category,
         items: data.menuItems.filter((item) => {
           if (item.categoryId !== category.id) return false;
+          if (menuFilter === "vegetarian" && !VEGETARIAN_ITEM_IDS.has(item.id)) {
+            return false;
+          }
+          if (menuFilter === "special" && !SPECIAL_ITEM_IDS.has(item.id)) {
+            return false;
+          }
           if (!query) return true;
           return (
             item.name.toLocaleLowerCase().includes(query) ||
@@ -483,9 +523,58 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
         }),
       }))
       .filter((group) => group.items.length > 0);
-  }, [categories, data, search, selectedCategory]);
+  }, [categories, data, menuFilter, search, selectedCategory]);
+  const heroSlides = useMemo<HeroSlide[]>(() => {
+    const heroImage = "/brand/virtual-rudra-awadhi-hero.jpg";
+    const featuredItems = (data?.menuItems ?? [])
+      .filter(
+        (item) =>
+          item.isAvailable &&
+          item.imageUrl.trim().length > 0 &&
+          item.imageUrl.trim() !== heroImage,
+      )
+      .slice(0, 3);
+
+    return [
+      {
+        id: "signature-biryani",
+        kicker: "AUTHENTIC TASTE",
+        title: "Awadhi Biryani",
+        description: "A royal feast in every bite.",
+        imageUrl: heroImage,
+      },
+      ...featuredItems.map((item) => ({
+        id: item.id,
+        kicker: "FRESH FROM OUR KITCHEN",
+        title: item.name,
+        description: item.description,
+        imageUrl: item.imageUrl.trim(),
+      })),
+    ];
+  }, [data]);
 
   const resultCount = groups.reduce((count, group) => count + group.items.length, 0);
+  const activeHeroSlideIndex = heroSlideIndex % heroSlides.length;
+  const activeHeroSlide = heroSlides[activeHeroSlideIndex] ?? heroSlides[0];
+  const heroTitleWords = activeHeroSlide.title.trim().split(/\s+/);
+  const heroTitleAccent = heroTitleWords.pop() ?? activeHeroSlide.title;
+  const heroTitleLead = heroTitleWords.join(" ");
+
+  useEffect(() => {
+    if (
+      page !== "menu" ||
+      heroSlides.length < 2 ||
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    ) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      setHeroSlideIndex((current) => (current + 1) % heroSlides.length);
+    }, 5600);
+    return () => window.clearInterval(timer);
+  }, [heroSlides.length, page]);
+
   const cartItems = cart.map(({ itemId, quantity }) => {
     const item = data?.menuItems.find((menuItem) => menuItem.id === itemId);
     return {
@@ -504,19 +593,37 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   });
   const hasUnavailableItems = cartItems.some((line) => line.isUnavailable);
   const cartItemCount = cartItems.reduce((count, line) => count + line.quantity, 0);
+  const confirmedItemCount =
+    orderConfirmation?.items.reduce((count, item) => count + item.quantity, 0) ?? 0;
   const subtotal = cartItems.reduce(
     (total, line) =>
       total + (line.isUnavailable ? 0 : line.item.priceINR * line.quantity),
     0,
   );
   const selectedTable = data?.tables.find((table) => table.id === tableId);
-  const tableNumber = qrTableNumber ?? selectedTable?.tableNumber;
+  const tableNumber = selectedTable?.tableNumber ?? null;
+  const tableNumberMismatch =
+    tableId !== null &&
+    data !== null &&
+    qrTableNumber !== null &&
+    (selectedTable === undefined || qrTableNumber !== selectedTable.tableNumber);
   const tableQuery = new URLSearchParams();
   if (tableId) tableQuery.set("tableId", tableId);
-  if (qrTableNumber !== null) tableQuery.set("tableNumber", String(qrTableNumber));
+  if (tableNumber !== null) tableQuery.set("tableNumber", String(tableNumber));
   const tableQueryString = tableQuery.toString();
   const tableQuerySuffix = tableQueryString ? `?${tableQueryString}` : "";
   const tableHref = (path: string) => `${path}${tableQuerySuffix}`;
+  const focusMenuSearch = () => {
+    const input = searchInputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
+  const showHeroSlide = (direction: -1 | 1) => {
+    setHeroSlideIndex(
+      (current) => (current + direction + heroSlides.length) % heroSlides.length,
+    );
+  };
 
   const addToCart = (item: DemoMenuItem) => {
     if (!item.isAvailable || isSubmittingOrder) return;
@@ -588,6 +695,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       customerPhone.replace(/\D/g, "").length > 15 ||
       !Number.isSafeInteger(parsedTableNumber) ||
       !orderTable ||
+      tableNumberMismatch ||
       (tableId !== null &&
         (!selectedTable || selectedTable.tableNumber !== parsedTableNumber))
     ) {
@@ -666,10 +774,23 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
     ) {
       submissionLock.current = false;
       setIsSubmittingOrder(false);
-      setCheckoutMessage(
+      const errorMessage =
         isRecord(result) && typeof result.error === "string"
           ? result.error
-          : "The order could not be confirmed. Please retry.",
+          : "The order could not be confirmed. Please retry.";
+      if ([400, 403, 413, 415, 422].includes(response.status)) {
+        try {
+          window.sessionStorage.removeItem(PENDING_ORDER_REQUEST_STORAGE_KEY);
+          pendingOrderRequest.current = null;
+        } catch {
+          setCheckoutMessage(
+            `${errorMessage} The retry state could not be cleared, so keep the same checkout details and cart before retrying.`,
+          );
+          return;
+        }
+      }
+      setCheckoutMessage(
+        errorMessage,
       );
       return;
     }
@@ -760,8 +881,8 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
 
   return (
     <main
-      className={`vr-menu-page${page === "menu" && cartItemCount > 0 ? " has-cart-bar" : ""}`}
-      data-customer-theme="light"
+      className={`vr-menu-page${page === "menu" ? " vr-menu-home" : ""}${page === "menu" && cartItemCount > 0 ? " has-cart-bar" : ""}`}
+      data-customer-theme="dark"
     >
       <div className="vr-menu-shell">
         <header className="vr-menu-header">
@@ -791,14 +912,55 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               Checkout
             </Link>
           </nav>
+          {page === "menu" && (
+            <label className="vr-menu-header-search-field">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <circle cx="10.8" cy="10.8" r="6.8" />
+                <path d="m16 16 4.2 4.2" />
+              </svg>
+              <input
+                aria-label="Search menu"
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search dishes or categories..."
+                type="search"
+                value={search}
+              />
+            </label>
+          )}
+          <Link
+            aria-label={`View cart${cartItemCount > 0 ? `, ${cartItemCount} items` : ""}`}
+            className="vr-menu-header-cart"
+            href={tableHref("/cart")}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 2-1.6L21 8H6" />
+              <circle cx="10" cy="21" r="1" />
+              <circle cx="18" cy="21" r="1" />
+            </svg>
+            {cartItemCount > 0 && <span>{cartItemCount}</span>}
+          </Link>
           <CustomerThemeToggle />
+          {page === "menu" && (
+            <button
+              aria-label="Search dishes"
+              className="vr-menu-header-search"
+              onClick={focusMenuSearch}
+              title="Search dishes"
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <circle cx="10.8" cy="10.8" r="6.8" />
+                <path d="m16 16 4.2 4.2" />
+              </svg>
+            </button>
+          )}
           <span className="vr-menu-header-note">
             <i aria-hidden="true" />
             Freshly made, always
           </span>
         </header>
 
-        {tableId !== null && tableNumber ? (
+        {page !== "menu" && (tableId !== null && tableNumber && !tableNumberMismatch ? (
           <div className="vr-menu-table-notice">
             <span>ORDERING AT</span>
             <strong>Table {tableNumber}</strong>
@@ -808,31 +970,149 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             <strong>Table not recognized</strong>
             <span>Please ask a team member for assistance.</span>
           </div>
-        ) : null}
+        ) : null)}
 
         {page === "menu" && <section aria-labelledby="menu-title" className="vr-menu-intro">
-          <p className="vr-menu-eyebrow">A MENU FOR EVERY MOOD</p>
-          <h1 id="menu-title">
-            Good food.
-            <br />
-            <span>Great moments.</span>
-          </h1>
-          <p className="vr-menu-description">
-            Discover something delicious, thoughtfully prepared and ready to be
-            enjoyed.
-          </p>
-          <label className="vr-menu-search">
+          <h1 className="sr-only" id="menu-title">Explore the Virtual Rudra menu</h1>
+          <div
+            aria-label="Featured dishes"
+            aria-live="off"
+            aria-roledescription="carousel"
+            className="vr-menu-hero"
+            onPointerDown={(event) => {
+              heroPointerStart.current = event.clientX;
+            }}
+            onPointerUp={(event) => {
+              const start = heroPointerStart.current;
+              heroPointerStart.current = null;
+              if (start === null || Math.abs(event.clientX - start) < 44) return;
+              showHeroSlide(event.clientX < start ? 1 : -1);
+            }}
+            onPointerCancel={() => {
+              heroPointerStart.current = null;
+            }}
+            role="region"
+          >
+            <Image
+              alt=""
+              className="vr-menu-hero-image"
+              fill
+              key={activeHeroSlide.id}
+              onError={(event) => {
+                if (!event.currentTarget.src.endsWith("/brand/virtual-rudra-awadhi-hero.jpg")) {
+                  event.currentTarget.src = "/brand/virtual-rudra-awadhi-hero.jpg";
+                }
+              }}
+              priority
+              sizes="(max-width: 600px) 100vw, 1200px"
+              src={activeHeroSlide.imageUrl}
+              unoptimized
+            />
+            <div className="vr-menu-hero-copy" key={`${activeHeroSlide.id}-copy`}>
+              <p>{activeHeroSlide.kicker}</p>
+              <h2>
+                {heroTitleLead && <>{heroTitleLead} </>}
+                <span>{heroTitleAccent}</span>
+              </h2>
+              <span className="vr-menu-hero-description">
+                {activeHeroSlide.description}
+              </span>
+              <a href="#menu-results">Order Now <span aria-hidden="true">→</span></a>
+            </div>
+            {heroSlides.length > 1 && (
+              <div aria-label="Featured dish slides" className="vr-menu-hero-controls" role="group">
+                <button
+                  aria-label="Previous featured dish"
+                  className="vr-menu-hero-arrow is-previous"
+                  onClick={() => showHeroSlide(-1)}
+                  type="button"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m15 18-6-6 6-6" />
+                  </svg>
+                </button>
+                <div className="vr-menu-hero-dots">
+                  {heroSlides.map((slide, index) => (
+                    <button
+                      aria-label={`Show ${slide.title}`}
+                      aria-pressed={activeHeroSlideIndex === index}
+                      className={activeHeroSlideIndex === index ? "is-active" : ""}
+                      key={slide.id}
+                      onClick={() => setHeroSlideIndex(index)}
+                      type="button"
+                    />
+                  ))}
+                </div>
+                <button
+                  aria-label="Next featured dish"
+                  className="vr-menu-hero-arrow is-next"
+                  onClick={() => showHeroSlide(1)}
+                  type="button"
+                >
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </button>
+              </div>
+            )}
+          </div>
+          <div className={`vr-menu-search${filterOpen ? " is-filter-open" : ""}`}>
             <svg aria-hidden="true" viewBox="0 0 24 24">
               <circle cx="10.8" cy="10.8" r="6.8" />
               <path d="m16 16 4.2 4.2" />
             </svg>
             <input
               aria-label="Search menu"
+              id="menu-search"
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search dishes or categories"
+              placeholder="Search for dishes or categories..."
+              ref={searchInputRef}
               type="search"
               value={search}
             />
+            <button
+              aria-label={`Filter menu items: ${menuFilter === "all" ? "all dishes" : menuFilter === "vegetarian" ? "vegetarian" : "chef's choice"}`}
+              aria-pressed={menuFilter !== "all"}
+              aria-expanded={filterOpen}
+              aria-controls={filterOpen ? "menu-filter-options" : undefined}
+              className={`vr-menu-search-filter${menuFilter !== "all" ? " is-active" : ""}`}
+              onClick={() => setFilterOpen((open) => !open)}
+              title={`Filter: ${menuFilter === "all" ? "all dishes" : menuFilter === "vegetarian" ? "pure vegetarian" : "chef's choice"}`}
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M4 7h9m4 0h3M4 17h3m4 0h9" />
+                <circle cx="15" cy="7" r="2" />
+                <circle cx="9" cy="17" r="2" />
+              </svg>
+            </button>
+            {filterOpen && (
+              <div
+                aria-label="Filter menu items"
+                className="vr-menu-search-filter-menu"
+                id="menu-filter-options"
+                role="group"
+              >
+                {([
+                  ["all", "All dishes"],
+                  ["vegetarian", "Pure vegetarian"],
+                  ["special", "Chef's choice"],
+                ] as const).map(([filter, label]) => (
+                  <button
+                    aria-pressed={menuFilter === filter}
+                    className={menuFilter === filter ? "is-selected" : undefined}
+                    key={filter}
+                    onClick={() => {
+                      setMenuFilter(filter);
+                      setFilterOpen(false);
+                    }}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             {search && (
               <button
                 aria-label="Clear search"
@@ -843,33 +1123,71 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 Clear
               </button>
             )}
-          </label>
+          </div>
         </section>}
 
         {page === "menu" && data && (
-          <nav aria-label="Menu categories" className="vr-menu-filters">
-            <button
-              aria-pressed={selectedCategory === "all"}
-              className={selectedCategory === "all" ? "is-selected" : ""}
-              onClick={() => setSelectedCategory("all")}
-              type="button"
-            >
-              All dishes <span>{data.menuItems.length}</span>
-            </button>
-            {categories.map((category) => (
-              <button
-                aria-pressed={selectedCategory === category.id}
-                className={selectedCategory === category.id ? "is-selected" : ""}
-                key={category.id}
-                onClick={() => setSelectedCategory(category.id)}
-                type="button"
-              >
-                {category.name}
-                <span>{itemCounts.get(category.id) ?? 0}</span>
-              </button>
-            ))}
-          </nav>
+          <section aria-labelledby="menu-categories-title" className="vr-menu-category-discovery">
+            <div className="vr-menu-category-discovery-heading">
+              <h2 id="menu-categories-title">EPICUREAN CATEGORIES</h2>
+              <a href="#menu-results">Explore <span aria-hidden="true">→</span></a>
+            </div>
+            <nav aria-label="Menu categories" className="vr-menu-category-rail">
+              {categories
+                .filter((category) => (itemCounts.get(category.id) ?? 0) > 0)
+                .map((category) => {
+                  const categoryImage =
+                    category.imageUrl.trim() ||
+                    data.menuItems
+                      .find((item) => item.categoryId === category.id)
+                      ?.imageUrl.trim() ||
+                    "/brand/virtual-rudra-awadhi-hero.jpg";
+                  return (
+                    <button
+                      aria-pressed={selectedCategory === category.id}
+                      className={selectedCategory === category.id ? "is-selected" : ""}
+                      key={category.id}
+                      onClick={() => {
+                        setSelectedCategory((selected) =>
+                          selected === category.id ? "all" : category.id,
+                        );
+                        document.getElementById("menu-results")?.scrollIntoView({
+                          block: "start",
+                        });
+                      }}
+                      type="button"
+                    >
+                      <span className="vr-menu-category-rail-image">
+                        <Image
+                          alt=""
+                          fill
+                          sizes="(max-width: 600px) 64px, 76px"
+                          src={categoryImage}
+                          onError={(event) => {
+                            event.currentTarget.src =
+                              "/brand/virtual-rudra-awadhi-hero.jpg";
+                          }}
+                          unoptimized
+                        />
+                      </span>
+                      <span className="vr-menu-category-rail-name">{category.name}</span>
+                    </button>
+                  );
+                })}
+            </nav>
+          </section>
         )}
+        {page === "menu" && (tableId !== null && tableNumber && !tableNumberMismatch ? (
+          <div className="vr-menu-table-notice">
+            <span>ORDERING AT</span>
+            <strong>Table {tableNumber}</strong>
+          </div>
+        ) : tableId !== null && data ? (
+          <div className="vr-menu-table-notice is-invalid" role="status">
+            <strong>Table not recognized</strong>
+            <span>Please ask a team member for assistance.</span>
+          </div>
+        ) : null)}
 
         {(page === "cart" || page === "checkout") && !data && (
           <section aria-live="polite" className="vr-menu-cart">
@@ -921,6 +1239,10 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                             fill
                             sizes="(max-width: 700px) 76px, 88px"
                             src={item.imageUrl}
+                            onError={(event) => {
+                              event.currentTarget.src =
+                                "/brand/virtual-rudra-awadhi-hero.jpg";
+                            }}
                             unoptimized
                           />
                         ) : (
@@ -1011,22 +1333,24 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
         ) : page === "thank-you" && confirmationReady && orderConfirmation ? (
           <section
             aria-labelledby="order-confirmation-title"
-            className="vr-menu-confirmation"
+            className="vr-menu-confirmation vr-order-confirmation"
             role="status"
           >
-            <span aria-hidden="true" className="vr-menu-confirmation-icon">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="m6 12.5 4 4 8-9" />
-              </svg>
-            </span>
-            <p className="vr-menu-category-kicker">ORDER CONFIRMED</p>
-            <h2 id="order-confirmation-title">Thank You for Your Order!</h2>
-            <p className="vr-menu-confirmation-message">
-              Your order has been placed successfully
-            </p>
+            <header className="vr-order-confirmation-hero">
+              <span aria-hidden="true" className="vr-menu-confirmation-icon">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path d="m6 12.5 4 4 8-9" />
+                </svg>
+              </span>
+              <p className="vr-menu-category-kicker">ORDER CONFIRMED</p>
+              <h2 id="order-confirmation-title">Thank You for Your Order!</h2>
+              <p className="vr-menu-confirmation-message">
+                Your order has been received and confirmed.
+              </p>
+            </header>
             <dl className="vr-menu-confirmation-details">
               <div>
-                <dt>Order number</dt>
+                <dt>Order ID</dt>
                 <dd>{orderConfirmation.id}</dd>
               </div>
               <div>
@@ -1038,92 +1362,98 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 <dd>Table {orderConfirmation.tableNumber}</dd>
               </div>
             </dl>
-            <div className="vr-menu-checkout-summary">
-              <h3>Items</h3>
-              <ul>
-                {orderConfirmation.items.map((item) => (
-                  <li key={item.itemId}>
-                    <span>{item.name} × {item.quantity}</span>
-                    <strong>{formatINR.format(item.unitPrice * item.quantity)}</strong>
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <form
-              aria-labelledby="feedback-title"
-              className="w-full max-w-[440px] rounded-xl border border-[#30343d] bg-[#12151a] p-4 text-left sm:p-5"
-              onSubmit={handleFeedbackSubmit}
-            >
-              <h3 className="text-sm font-semibold text-[#f3f4f6]" id="feedback-title">
-                How was your experience?
-              </h3>
-              <p className="mt-1 text-xs text-[#9a9faa]">
-                Your feedback helps us improve.
-              </p>
-              <fieldset className="mt-4">
-                <legend className="mb-2 text-xs font-medium text-[#c1c3c9]">
-                  Rating
-                </legend>
-                <div className="flex gap-2" role="group" aria-label="Rate your experience">
-                  {[1, 2, 3, 4, 5].map((rating) => (
-                    <button
-                      aria-label={`${rating} ${rating === 1 ? "star" : "stars"}`}
-                      aria-pressed={feedbackRating === rating}
-                      className={`grid size-10 place-items-center rounded-lg border text-xl transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#ffad70] ${
-                        feedbackRating >= rating
-                          ? "border-[#c65c20] bg-[#382216] text-[#ffad70]"
-                          : "border-[#30343d] text-[#777e89] hover:border-[#c65c20]"
-                      }`}
-                      disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                      key={rating}
-                      onClick={() => setFeedbackRating(rating)}
-                      type="button"
-                    >
-                      ★
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-              <label className="mt-4 block text-xs font-medium text-[#c1c3c9]" htmlFor="customer-feedback-comment">
-                Comment <span className="font-normal text-[#888d98]">(optional)</span>
-              </label>
-              <textarea
-                className="mt-2 min-h-24 w-full resize-y rounded-lg border border-[#30343d] bg-[#0d0f12] px-3 py-2 text-sm text-[#f3f4f6] outline-none placeholder:text-[#777e89] focus:border-[#f97316] disabled:opacity-70"
-                disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                id="customer-feedback-comment"
-                maxLength={1000}
-                onChange={(event) => setFeedbackComment(event.target.value)}
-                placeholder="Tell us about your visit"
-                value={feedbackComment}
-              />
-              {feedbackError && (
-                <p className="mt-3 text-xs text-[#ff958a]" role="alert">
-                  {feedbackError}
-                </p>
-              )}
-              {feedbackMessage && (
-                <p className="mt-3 text-xs text-[#4ade80]" role="status">
-                  {feedbackMessage}
-                </p>
-              )}
-              <button
-                className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg bg-[#f97316] px-4 text-xs font-semibold text-white transition hover:bg-[#ea580c] disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                type="submit"
+            <div className="vr-order-confirmation-actions">
+              <Link
+                className="vr-order-confirmation-action vr-order-confirmation-track"
+                href={`/track/${orderConfirmation.trackingToken}`}
+                prefetch={false}
               >
-                {feedbackSubmitting ? "Saving feedback…" : "Submit feedback"}
-              </button>
-            </form>
-            <Link
-              className="vr-menu-place-order"
-              href={`/track/${orderConfirmation.trackingToken}`}
-              prefetch={false}
-            >
-              Track your order
-            </Link>
-            <Link className="vr-menu-place-order" href={tableHref("/menu")}>
-              Back to Menu
-            </Link>
+                Track Order <span aria-hidden="true">→</span>
+              </Link>
+              <Link
+                className="vr-order-confirmation-action"
+                href={`/invoice/${orderConfirmation.trackingToken}?download=1`}
+                prefetch={false}
+              >
+                Download Invoice
+              </Link>
+              <Link className="vr-order-confirmation-menu" href={tableHref("/menu")}>
+                Back to Menu
+              </Link>
+            </div>
+            <div className="vr-order-confirmation-content">
+              <section aria-label="Order summary" className="vr-menu-checkout-summary vr-order-summary">
+                <div className="vr-order-summary-heading">
+                  <h3>Order Summary</h3>
+                  <span>
+                    {confirmedItemCount} {confirmedItemCount === 1 ? "item" : "items"}
+                  </span>
+                </div>
+                <ul>
+                  {orderConfirmation.items.map((item) => (
+                    <li key={item.itemId}>
+                      <span>
+                        <small>{item.quantity}×</small>
+                        {item.name}
+                      </span>
+                      <strong>{formatINR.format(item.unitPrice * item.quantity)}</strong>
+                    </li>
+                  ))}
+                </ul>
+                <div className="vr-order-summary-total">
+                  <span>Order Total</span>
+                  <strong>{formatINR.format(orderConfirmation.total)}</strong>
+                </div>
+              </section>
+              <div className="vr-order-confirmation-side">
+                <form
+                  aria-labelledby="feedback-title"
+                  className="vr-order-feedback"
+                  onSubmit={handleFeedbackSubmit}
+                >
+                  <h3 id="feedback-title">Share Your Experience</h3>
+                  <p>How was your visit to Virtual Rudra?</p>
+                  <fieldset>
+                    <legend>Rate your experience</legend>
+                    <div className="vr-order-feedback-stars" role="group" aria-label="Rate your experience">
+                      {[1, 2, 3, 4, 5].map((rating) => (
+                        <button
+                          aria-label={`${rating} ${rating === 1 ? "star" : "stars"}`}
+                          aria-pressed={feedbackRating === rating}
+                          className={feedbackRating >= rating ? "is-selected" : undefined}
+                          disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                          key={rating}
+                          onClick={() => setFeedbackRating(rating)}
+                          type="button"
+                        >
+                          ★
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <label htmlFor="customer-feedback-comment">
+                    Comment <span>(optional)</span>
+                  </label>
+                  <textarea
+                    disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                    id="customer-feedback-comment"
+                    maxLength={1000}
+                    onChange={(event) => setFeedbackComment(event.target.value)}
+                    placeholder="Tell us about your visit"
+                    value={feedbackComment}
+                  />
+                  {feedbackError && <p className="vr-order-feedback-error" role="alert">{feedbackError}</p>}
+                  {feedbackMessage && <p className="vr-order-feedback-success" role="status">{feedbackMessage}</p>}
+                  <button
+                    className="vr-order-feedback-submit"
+                    disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                    type="submit"
+                  >
+                    {feedbackSubmitting ? "Saving feedback…" : "Submit Feedback"}
+                  </button>
+                </form>
+              </div>
+            </div>
           </section>
         ) : page === "thank-you" && confirmationReady ? (
           <section aria-labelledby="order-confirmation-title" className="vr-menu-confirmation">
@@ -1162,6 +1492,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
           </section>
         ) : page === "checkout" && data && (
           <form
+            aria-describedby="checkout-intro"
             aria-labelledby="checkout-title"
             className="vr-menu-checkout"
             onSubmit={handleCheckout}
@@ -1170,8 +1501,11 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               <div>
                 <p className="vr-menu-category-kicker">ALMOST THERE</p>
                 <h2 id="checkout-title">Checkout</h2>
+                <p className="vr-menu-checkout-intro" id="checkout-intro">
+                  Add your details, then review your dishes before placing the order.
+                </p>
               </div>
-              <Link href={tableHref("/cart")}>Back to cart</Link>
+              <Link href={tableHref("/cart")}>← Back to cart</Link>
             </div>
             <div className="vr-menu-checkout-fields">
               <p className="vr-menu-checkout-step">01 <span>YOUR DETAILS</span></p>
@@ -1233,8 +1567,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             <div aria-label="Order summary" className="vr-menu-checkout-summary">
               <div className="vr-menu-checkout-summary-heading">
                 <div>
-                  <p className="vr-menu-checkout-step">02 <span>REVIEW</span></p>
-                  <h3>Your order</h3>
+                  <p className="vr-menu-checkout-step">02 <span>ORDER REVIEW</span></p>
                 </div>
                 <span>{cartItemCount} {cartItemCount === 1 ? "item" : "items"}</span>
               </div>
@@ -1293,13 +1626,21 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               }
               type="submit"
             >
-              {isSubmittingOrder ? "Submitting Order…" : "Place Order"}
-              {!isSubmittingOrder && <span aria-hidden="true">→</span>}
+              <span className="vr-menu-place-order-amount">
+                <small>TOTAL PAYABLE</small>
+                <strong>
+                  {formatINR.format(orderConfirmation?.total ?? subtotal)}
+                </strong>
+              </span>
+              <span className="vr-menu-place-order-action">
+                {isSubmittingOrder ? "Submitting Order…" : "Place Order"}
+                {!isSubmittingOrder && <span aria-hidden="true">→</span>}
+              </span>
             </button>
           </form>
         )}
 
-        {page === "menu" && <div className="vr-menu-results">
+        {page === "menu" && <div className="vr-menu-results" id="menu-results">
           {loadError ? (
             <>
               <p className="vr-menu-message" role="alert">{loadError}</p>
@@ -1325,25 +1666,20 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
           ) : (
             <>
               <div className="vr-menu-results-heading">
-                <p>{selectedCategory === "all" ? "EXPLORE THE MENU" : "YOUR SELECTION"}</p>
+                <div>
+                  <p>{selectedCategory === "all" ? "MADE FRESH, SERVED WITH LOVE" : "YOUR SELECTION"}</p>
+                  <h2 id="menu-grid-title">
+                    {selectedCategory === "all"
+                      ? "Our Menu"
+                      : categories.find((category) => category.id === selectedCategory)?.name}
+                  </h2>
+                </div>
                 <span>{resultCount} {resultCount === 1 ? "dish" : "dishes"}</span>
               </div>
-              {groups.map(({ category, items }) => (
-                <section
-                  aria-labelledby={`category-${category.id}`}
-                  className="vr-menu-category"
-                  key={category.id}
-                >
-                  <div className="vr-menu-category-heading">
-                    <div>
-                      <p className="vr-menu-category-kicker">MADE WITH CARE</p>
-                      <h2 id={`category-${category.id}`}>{category.name}</h2>
-                      {category.description && <p>{category.description}</p>}
-                    </div>
-                    <span>{items.length.toString().padStart(2, "0")}</span>
-                  </div>
-                  <div className="vr-menu-grid">
-                    {items.map((item) => {
+              <section aria-labelledby="menu-grid-title" className="vr-menu-category">
+                <div className="vr-menu-grid">
+                  {groups.flatMap(({ items }) =>
+                    items.map((item) => {
                       const quantity =
                         cart.find((line) => line.itemId === item.id)?.quantity ?? 0;
                       return (
@@ -1352,17 +1688,18 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                           key={item.id}
                         >
                           <div className="vr-menu-photo">
-                            {item.imageUrl ? (
-                              <Image
-                                alt=""
-                                fill
-                                sizes="(max-width: 700px) calc(100vw - 32px), (max-width: 1280px) 50vw, 600px"
-                                src={item.imageUrl}
-                                unoptimized
-                              />
-                            ) : (
-                              <span aria-hidden="true" className="vr-menu-photo-mark">VR</span>
-                            )}
+                            <Image
+                              alt=""
+                              fill
+                              loading={item.id === groups[0]?.items[0]?.id ? "eager" : "lazy"}
+                              sizes="(max-width: 600px) 48vw, (max-width: 1180px) 48vw, 25vw"
+                              src={item.imageUrl.trim() || "/brand/virtual-rudra-awadhi-hero.jpg"}
+                              onError={(event) => {
+                                event.currentTarget.src =
+                                  "/brand/virtual-rudra-awadhi-hero.jpg";
+                              }}
+                              unoptimized
+                            />
                             <div className="vr-menu-item-badges">
                               {VEGETARIAN_ITEM_IDS.has(item.id) && (
                                 <span className="is-veg"><i aria-hidden="true" />Veg</span>
@@ -1423,6 +1760,11 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                                   onClick={() => addToCart(item)}
                                   type="button"
                                 >
+                                  {item.isAvailable && (
+                                    <svg aria-hidden="true" viewBox="0 0 24 24">
+                                      <path d="M12 5v14M5 12h14" />
+                                    </svg>
+                                  )}
                                   {item.isAvailable ? "Add" : "Unavailable"}
                                 </button>
                               )}
@@ -1430,10 +1772,10 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                           </div>
                         </article>
                       );
-                    })}
-                  </div>
-                </section>
-              ))}
+                    }),
+                  )}
+                </div>
+              </section>
             </>
           )}
         </div>}
@@ -1456,12 +1798,16 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 </svg>
               </button>
               <div className="vr-menu-dish-dialog-photo">
-                {selectedDish.imageUrl ? (
+                {selectedDish.imageUrl.trim() ? (
                   <Image
                     alt={selectedDish.name}
                     fill
                     sizes="(max-width: 700px) 100vw, 42vw"
-                    src={selectedDish.imageUrl}
+                    src={selectedDish.imageUrl.trim()}
+                    onError={(event) => {
+                      event.currentTarget.src =
+                        "/brand/virtual-rudra-awadhi-hero.jpg";
+                    }}
                     unoptimized
                   />
                 ) : (
@@ -1516,29 +1862,73 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             unoptimized
             width={587}
           />
-          <p>Virtual Rudra <span>·</span> Made for memorable meals</p>
+          <div className="vr-menu-footer-brand">
+            <strong>Virtual Rudra</strong>
+            <p>Good food. Great moments.</p>
+          </div>
+          {page === "menu" && (
+            <nav aria-label="Quick links" className="vr-menu-footer-links">
+              <Link href={tableHref("/menu")}>Menu</Link>
+              <Link href={tableHref("/cart")}>Cart</Link>
+              <Link href={tableHref("/checkout")}>Checkout</Link>
+            </nav>
+          )}
         </footer>
         <nav aria-label="Mobile order navigation" className="vr-menu-mobile-nav">
-          <Link aria-current={page === "menu" ? "page" : undefined} href={tableHref("/menu")}>
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path d="M4 3v7m4-7v7M6 3v18M17 3v18m0-18c-2 2-3 5-3 8h6c0-3-1-6-3-8Z" />
-            </svg>
-            <span>Menu</span>
-          </Link>
-          <Link aria-current={page === "cart" ? "page" : undefined} href={tableHref("/cart")}>
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 2-1.6L21 8H6" />
-              <circle cx="10" cy="21" r="1" />
-              <circle cx="18" cy="21" r="1" />
-            </svg>
-            <span>Cart{cartItemCount > 0 ? ` (${cartItemCount})` : ""}</span>
-          </Link>
-          <Link aria-current={page === "checkout" || page === "thank-you" ? "page" : undefined} href={tableHref("/checkout")}>
-            <svg aria-hidden="true" viewBox="0 0 24 24">
-              <path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" />
-            </svg>
-            <span>Order</span>
-          </Link>
+          {page === "menu" ? (
+            <>
+              <Link aria-current="page" href={tableHref("/menu")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z" />
+                </svg>
+                <span>Home</span>
+              </Link>
+              <button onClick={focusMenuSearch} type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <circle cx="10.8" cy="10.8" r="6.8" />
+                  <path d="m16 16 4.2 4.2" />
+                </svg>
+                <span>Search</span>
+              </button>
+              <Link href={tableHref("/cart")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 2-1.6L21 8H6" />
+                  <circle cx="10" cy="21" r="1" />
+                  <circle cx="18" cy="21" r="1" />
+                </svg>
+                <span>Cart{cartItemCount > 0 ? ` (${cartItemCount})` : ""}</span>
+              </Link>
+              <Link href={tableHref("/checkout")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" />
+                </svg>
+                <span>Checkout</span>
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link href={tableHref("/menu")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M4 3v7m4-7v7M6 3v18M17 3v18m0-18c-2 2-3 5-3 8h6c0-3-1-6-3-8Z" />
+                </svg>
+                <span>Menu</span>
+              </Link>
+              <Link aria-current={page === "cart" ? "page" : undefined} href={tableHref("/cart")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M3 4h2l2.2 11.2a2 2 0 0 0 2 1.6h8.5a2 2 0 0 0 2-1.6L21 8H6" />
+                  <circle cx="10" cy="21" r="1" />
+                  <circle cx="18" cy="21" r="1" />
+                </svg>
+                <span>Cart{cartItemCount > 0 ? ` (${cartItemCount})` : ""}</span>
+              </Link>
+              <Link aria-current={page === "checkout" || page === "thank-you" ? "page" : undefined} href={tableHref("/checkout")}>
+                <svg aria-hidden="true" viewBox="0 0 24 24">
+                  <path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" />
+                </svg>
+                <span>Order</span>
+              </Link>
+            </>
+          )}
         </nav>
         {page === "menu" && cartItemCount > 0 && (
           <aside aria-label="Cart total" className="vr-menu-sticky-cart">

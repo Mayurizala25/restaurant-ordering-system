@@ -41,15 +41,19 @@ A restaurant ordering and administration app built with Next.js, TypeScript, Tai
 
 ## Expo Go
 
-The separate `mobile/` Expo app opens this existing website in a WebView, with a native QR scanner that opens valid table menu codes in the app. Menu, ordering, and tracking continue to use the existing website and Supabase APIs; the Next.js website remains unchanged. From the repository root, run:
+The separate `mobile/` Expo app opens this website in a WebView, with a native QR scanner that opens valid table menu codes in the app. Menu, ordering, and tracking continue to use the existing website and Supabase APIs. Run both servers in separate terminals:
 
 ```sh
-cd mobile
-npm install
+# Terminal 1: repository root
+npm run dev
+
+# Terminal 2: mobile/
 npm run start
 ```
 
-The Next.js website uses port `3000`; Expo Go and Expo Web use port `8082` through the provided mobile scripts. The Expo scripts use LAN mode so the QR code advertises the computer's detected LAN address. Open Expo Go on your phone and scan its QR code. The native app loads the hosted website by default. To test the local website on a phone, set `EXPO_PUBLIC_WEB_URL` to a LAN-reachable URL such as `http://192.168.1.10:3000` before starting Expo; `localhost` on the phone will not reach your computer. If your network blocks LAN connections, use the Expo tunnel script on port `8082`. To open the existing website in Expo Web, run `npm run web` from `mobile/`; Expo Web hands off to the Next.js admin login on port `3000`, using the same host you used to open Expo Web, and shows a sign-in link during handoff. It does not embed a second copy of the admin UI. If the Next.js site uses a different host (including for a web export), set `EXPO_PUBLIC_WEB_URL` to its reachable origin before starting or exporting.
+The Next.js server uses port `3000`; Expo Go and Expo Web use port `8081`. The mobile start scripts select the IPv4 address used by the active default route and pass it to Expo so the manifest and QR code advertise the LAN address rather than `localhost`. The launcher prints the Expo Go URL for manual entry if the QR code is unavailable and defaults the WebView URL to `http://<LAN-IPv4>:3000/`. In development, the WebView uses that local URL; keep the phone and computer on the same Wi-Fi, then scan the current QR code from the `mobile/` Expo session or enter `exp://<LAN-IPv4>:8081` in Expo Go. No separate `connect.js` server is used by this project. `EXPO_PUBLIC_WEBVIEW_URL` remains an optional override; for example, in PowerShell: `$env:EXPO_PUBLIC_WEBVIEW_URL = "http://<PC-Wi-Fi-IPv4>:3000"`. Production builds continue to use the hosted site unless this override is set. Do not use Expo's `--clear` option for normal starts; it empties Metro's transform cache and makes startup slower. Use it only to troubleshoot a stale or corrupt Metro cache.
+
+To open the existing website in Expo Web, run `npm run web` from `mobile/`; Expo Web hands off to the Next.js admin login on port `3000`, using the same host you used to open Expo Web, and shows a sign-in link during handoff. It does not embed a second copy of the admin UI.
 
 The Supabase migrations enable row-level security and revoke direct public/authenticated access to application data. Server routes use the service-role key and explicitly scope reads and writes to `SUPABASE_RESTAURANT_ID`. This configuration serves **one restaurant per app deployment**; it is not a multi-restaurant admin account or tenant selector.
 

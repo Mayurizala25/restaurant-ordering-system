@@ -19,7 +19,9 @@ export const metadata: Metadata = {
     "Made for memorable meals. A considered restaurant workspace by Virtual Rudra.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html
       lang="en"
