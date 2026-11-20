@@ -85,23 +85,55 @@ export async function POST(request: Request) {
   url.searchParams.set("tracking_token_hash", `eq.${tokenHash}`);
   url.searchParams.set(
     "select",
-    "id,status,total_inr,created_at,customer_name,restaurant_tables(table_number),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr)",
+    "id,status,total_inr,tax_rate_percent,tax_amount_inr,coupon_code,coupon_discount_inr,created_at,customer_name,restaurant_tables(table_number),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr)",
   );
   url.searchParams.set("limit", "1");
 
   let response: Response;
+  const timeoutSignal = AbortSignal.timeout(10_000);
   try {
     response = await fetch(url, {
       cache: "no-store",
       headers: {
         apikey: configuration.serviceRoleKey,
+        Authorization: `Bearer ${configuration.serviceRoleKey}`,
         Accept: "application/json",
       },
+      signal: timeoutSignal,
     });
-  } catch {
-    return jsonError("Could not load this order's status.", 502);
+  } catch (cause) {
+    console.error("Supabase order tracking query failed.", {
+      reason:
+        cause instanceof Error ? cause.message : "Unknown network error.",
+      timedOut: timeoutSignal.aborted,
+    });
+    return jsonError(
+      timeoutSignal.aborted
+        ? "Loading this order timed out. Please try again."
+        : "Could not connect to this order's details. Please try again.",
+      timeoutSignal.aborted ? 504 : 502,
+    );
   }
-  if (!response.ok) return jsonError("Could not load this order's status.", 502);
+  if (!response.ok) {
+    const upstreamError: unknown = await response.json().catch(() => null);
+    console.error("Supabase order tracking query returned an error.", {
+      status: response.status,
+      code:
+        isRecord(upstreamError) && typeof upstreamError.code === "string"
+          ? upstreamError.code
+          : null,
+      message:
+        isRecord(upstreamError) && typeof upstreamError.message === "string"
+          ? upstreamError.message.replace(/[\r\n\t]+/g, " ").trim().slice(0, 300)
+          : "No error message was returned.",
+    });
+    return jsonError(
+      response.status >= 500
+        ? "Order details are temporarily unavailable. Please try again."
+        : "Order details could not be verified.",
+      502,
+    );
+  }
 
   let rows: unknown;
   try {
@@ -114,6 +146,9 @@ export async function POST(request: Request) {
   }
 
   const order = rows[0];
+  const table = Array.isArray(order.restaurant_tables)
+    ? order.restaurant_tables[0]
+    : order.restaurant_tables;
   if (
     typeof order.id !== "string" ||
     !UUID_PATTERN.test(order.id) ||
@@ -126,9 +161,29 @@ export async function POST(request: Request) {
       typeof order.total_inr !== "number") ||
     !Number.isFinite(Number(order.total_inr)) ||
     Number(order.total_inr) < 0 ||
-    !isRecord(order.restaurant_tables) ||
-    typeof order.restaurant_tables.table_number !== "number" ||
-    !Number.isSafeInteger(order.restaurant_tables.table_number) ||
+    (typeof order.tax_rate_percent !== "string" &&
+      typeof order.tax_rate_percent !== "number") ||
+    !Number.isFinite(Number(order.tax_rate_percent)) ||
+    Number(order.tax_rate_percent) < 0 ||
+    Number(order.tax_rate_percent) > 100 ||
+    Number(Number(order.tax_rate_percent).toFixed(2)) !==
+      Number(order.tax_rate_percent) ||
+    (typeof order.tax_amount_inr !== "string" &&
+      typeof order.tax_amount_inr !== "number") ||
+    !Number.isFinite(Number(order.tax_amount_inr)) ||
+    Number(order.tax_amount_inr) < 0 ||
+    Number(order.tax_amount_inr) > Number(order.total_inr) ||
+    (typeof order.coupon_discount_inr !== "string" &&
+      typeof order.coupon_discount_inr !== "number") ||
+    !Number.isFinite(Number(order.coupon_discount_inr)) ||
+    Number(order.coupon_discount_inr) < 0 ||
+    (order.coupon_code != null &&
+      (typeof order.coupon_code !== "string" ||
+        order.coupon_code.length < 1 ||
+        order.coupon_code.length > 32)) ||
+    !isRecord(table) ||
+    typeof table.table_number !== "number" ||
+    !Number.isSafeInteger(table.table_number) ||
     !Array.isArray(order.restaurant_order_items)
   ) {
     return jsonError("Order tracking data is invalid.", 502);
@@ -167,8 +222,17 @@ export async function POST(request: Request) {
         status: order.status,
         createdAt: order.created_at,
         customerName: order.customer_name,
+        subtotal:
+          Number(order.total_inr) -
+          Number(order.tax_amount_inr) +
+          Number(order.coupon_discount_inr ?? 0),
+        taxRatePercent: Number(order.tax_rate_percent),
+        taxAmount: Number(order.tax_amount_inr),
+        discountAmount: Number(order.coupon_discount_inr ?? 0),
+        couponCode:
+          typeof order.coupon_code === "string" ? order.coupon_code : null,
         total: Number(order.total_inr),
-        tableNumber: order.restaurant_tables.table_number,
+        tableNumber: table.table_number,
         items,
       },
     },

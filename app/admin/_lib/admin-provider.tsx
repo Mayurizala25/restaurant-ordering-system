@@ -373,6 +373,7 @@ export function AdminProvider({ children }: { children: React.ReactNode }) {
 const adminNavigation = [
   { label: "Dashboard", href: "/admin/dashboard", icon: "dashboard" },
   { label: "Orders", href: "/admin/orders", icon: "orders" },
+  { label: "Coupons", href: "/admin/coupons", icon: "analytics" },
   { label: "Categories", href: "/admin/categories", icon: "categories" },
   { label: "Menu Items", href: "/admin/menu-items", icon: "menu" },
   { label: "Tables", href: "/admin/tables", icon: "tables" },

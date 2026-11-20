@@ -31,6 +31,8 @@ type OrderItem = {
   id: string;
   item_name: string;
   quantity: number;
+  spice_level: "Mild" | "Medium" | "Spicy";
+  special_instructions: string;
 };
 
 type OrderTable = { table_number: number };
@@ -39,6 +41,10 @@ type AdminOrder = {
   id: string;
   status: string;
   total_inr: number | string;
+  tax_rate_percent: number | string;
+  tax_amount_inr: number | string;
+  coupon_code: string | null;
+  coupon_discount_inr: number | string;
   created_at: string;
   restaurant_tables: OrderTable | OrderTable[] | null;
   restaurant_order_items: OrderItem[];
@@ -62,6 +68,11 @@ const money = new Intl.NumberFormat("en-IN", {
   currency: "INR",
   maximumFractionDigits: 0,
 });
+const preciseMoney = new Intl.NumberFormat("en-IN", {
+  style: "currency",
+  currency: "INR",
+  maximumFractionDigits: 2,
+});
 const orderDate = new Intl.DateTimeFormat("en-IN", {
   dateStyle: "medium",
   timeStyle: "short",
@@ -81,7 +92,11 @@ function isOrderItem(value: unknown): value is OrderItem {
     typeof value.id === "string" &&
     typeof value.item_name === "string" &&
     typeof value.quantity === "number" &&
-    Number.isSafeInteger(value.quantity)
+    Number.isSafeInteger(value.quantity) &&
+    (value.spice_level === "Mild" ||
+      value.spice_level === "Medium" ||
+      value.spice_level === "Spicy") &&
+    typeof value.special_instructions === "string"
   );
 }
 
@@ -93,6 +108,22 @@ function isOrder(value: unknown): value is AdminOrder {
     (typeof value.total_inr !== "number" &&
       typeof value.total_inr !== "string") ||
     !Number.isFinite(Number(value.total_inr)) ||
+    (typeof value.tax_rate_percent !== "number" &&
+      typeof value.tax_rate_percent !== "string") ||
+    !Number.isFinite(Number(value.tax_rate_percent)) ||
+    Number(value.tax_rate_percent) < 0 ||
+    Number(value.tax_rate_percent) > 100 ||
+    (typeof value.tax_amount_inr !== "number" &&
+      typeof value.tax_amount_inr !== "string") ||
+    !Number.isFinite(Number(value.tax_amount_inr)) ||
+    Number(value.tax_amount_inr) < 0 ||
+    (value.coupon_code !== null &&
+      (typeof value.coupon_code !== "string" ||
+        value.coupon_code.length > 32)) ||
+    (typeof value.coupon_discount_inr !== "number" &&
+      typeof value.coupon_discount_inr !== "string") ||
+    !Number.isFinite(Number(value.coupon_discount_inr)) ||
+    Number(value.coupon_discount_inr) < 0 ||
     typeof value.created_at !== "string" ||
     !Array.isArray(value.restaurant_order_items) ||
     !value.restaurant_order_items.every(isOrderItem)
@@ -623,6 +654,16 @@ function OrderCard({
           <p className="mt-1 text-sm font-bold tabular-nums text-foreground">
             {money.format(Number(order.total_inr))}
           </p>
+          <p className="mt-1 text-[10px] text-muted">
+            GST / Tax {Number(order.tax_rate_percent)}% ·{" "}
+            {preciseMoney.format(Number(order.tax_amount_inr))}
+          </p>
+          {order.coupon_code && (
+            <p className="mt-1 text-[10px] text-muted">
+              Coupon {order.coupon_code} ·{" "}
+              {preciseMoney.format(Number(order.coupon_discount_inr))} off
+            </p>
+          )}
         </div>
       </div>
 
@@ -636,6 +677,12 @@ function OrderCard({
               <li className="min-w-0 text-xs text-foreground" key={item.id}>
                 <span className="break-words font-medium">{item.item_name}</span>
                 <span className="ml-1 text-muted">× {item.quantity}</span>
+                <span className="ml-2 text-muted">· {item.spice_level}</span>
+                {item.special_instructions && (
+                  <span className="mt-1 block break-words text-muted">
+                    Note: {item.special_instructions}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

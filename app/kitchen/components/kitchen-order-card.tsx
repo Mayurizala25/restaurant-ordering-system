@@ -17,7 +17,14 @@ export type KitchenOrder = {
   placedAt: string;
   createdAt: string;
   status: OrderStatus;
-  items: { id: string; quantity: number; name: string; imageUrl: string }[];
+  items: {
+    id: string;
+    quantity: number;
+    name: string;
+    spiceLevel: string;
+    specialInstructions: string;
+    imageUrl: string;
+  }[];
   total?: string;
 };
 
@@ -105,7 +112,12 @@ export default function KitchenOrderCard({
             order.items.map((item) => (
               <div key={item.id}>
                 <b>{item.quantity}×</b>
-                <span>{item.name}</span>
+                <span>
+                  {item.name} · {item.spiceLevel}
+                  {item.specialInstructions && (
+                    <small className="k-item-note">Note: {item.specialInstructions}</small>
+                  )}
+                </span>
               </div>
             ))
           ) : (

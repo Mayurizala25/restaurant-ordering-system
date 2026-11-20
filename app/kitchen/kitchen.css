@@ -2711,4 +2711,12 @@
     transition-duration: .01ms !important;
   }
 }
+
+.k-item-note {
+  display: block;
+  margin-top: 3px;
+  color: var(--k-muted);
+  font-size: 9px;
+  font-weight: 400;
+}
 }

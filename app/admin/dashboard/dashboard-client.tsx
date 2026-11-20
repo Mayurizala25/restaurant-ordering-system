@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useAdmin } from "../_lib/admin-provider";
 import { AdminPageHeading } from "../_components/admin-page";
 import {
@@ -44,6 +50,8 @@ type AdminOrder = {
   id: string;
   status: string;
   total_inr: number | string;
+  tax_rate_percent: number | string;
+  tax_amount_inr: number | string;
   created_at: string;
   restaurant_tables: AdminOrderTable | AdminOrderTable[] | null;
   restaurant_order_items: AdminOrderItem[];
@@ -653,6 +661,8 @@ export function AdminDashboardClient() {
             />
           </section>
 
+          <TaxSettingsCard />
+
           <section aria-labelledby="recent-orders-heading" className="vr-dashboard-orders mb-6 overflow-hidden rounded-[14px] border border-[#e5e8e2] bg-white shadow-[0_8px_24px_rgba(26,45,35,0.04)]">
             <div className="flex items-center justify-between border-b border-[#e5e8e2] px-5 py-4 sm:px-6">
               <div>
@@ -864,6 +874,154 @@ export function AdminDashboardClient() {
   );
 }
 
+function TaxSettingsCard() {
+  const [taxRate, setTaxRate] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/admin/tax-settings", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload: unknown = await response.json().catch(() => null);
+        if (
+          !response.ok ||
+          !isRecord(payload) ||
+          typeof payload.taxRatePercent !== "number" ||
+          !Number.isFinite(payload.taxRatePercent) ||
+          payload.taxRatePercent < 0 ||
+          payload.taxRatePercent > 100
+        ) {
+          throw new Error(
+            isRecord(payload) && typeof payload.error === "string"
+              ? payload.error
+              : "Could not load the tax setting.",
+          );
+        }
+        setTaxRate(String(payload.taxRatePercent));
+      } catch (cause) {
+        if (!controller.signal.aborted) {
+          setError(
+            cause instanceof Error
+              ? cause.message
+              : "Could not load the tax setting.",
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, []);
+
+  const saveTaxRate = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setMessage("");
+    setError("");
+    const value = Number(taxRate);
+    if (
+      !Number.isFinite(value) ||
+      value < 0 ||
+      value > 100 ||
+      Number(value.toFixed(2)) !== value
+    ) {
+      setError("Enter a tax rate from 0 to 100 with at most two decimal places.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/admin/tax-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ taxRatePercent: value }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (
+        !response.ok ||
+        !isRecord(payload) ||
+        payload.taxRatePercent !== value
+      ) {
+        throw new Error(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Could not save the tax setting.",
+        );
+      }
+      setTaxRate(String(payload.taxRatePercent));
+      setMessage("Tax rate saved. It will apply to new orders only.");
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not save the tax setting.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section
+      aria-labelledby="tax-settings-heading"
+      className="mb-6 rounded-[14px] border border-[#e5e8e2] bg-white p-5 shadow-[0_8px_24px_rgba(26,45,35,0.04)]"
+    >
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="font-bold" id="tax-settings-heading">
+            GST / Tax settings
+          </h2>
+          <p className="mt-1 text-xs text-[#747b75]">
+            The saved rate applies to new orders. Existing invoices keep their original totals.
+          </p>
+        </div>
+        <form className="flex flex-wrap items-end gap-3" onSubmit={saveTaxRate}>
+          <label className="grid gap-1 text-xs font-medium text-[#747b75]">
+            Tax percentage
+            <span className="flex items-center gap-2">
+              <input
+                aria-label="Tax percentage"
+                className="w-28 rounded-md border border-[#e5e8e2] px-3 py-2 text-sm text-[#202822]"
+                disabled={loading || saving || Boolean(error && !taxRate)}
+                max="100"
+                min="0"
+                onChange={(event) => {
+                  setTaxRate(event.target.value);
+                  setMessage("");
+                  setError("");
+                }}
+                required
+                step="0.01"
+                type="number"
+                value={taxRate}
+              />
+              <span>%</span>
+            </span>
+          </label>
+          <button
+            className="rounded-md bg-[#185c43] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={loading || saving || !taxRate}
+            type="submit"
+          >
+            {saving ? "Saving…" : "Save tax rate"}
+          </button>
+        </form>
+      </div>
+      {loading && <p className="mt-3 text-xs text-[#747b75]" role="status">Loading tax setting…</p>}
+      {error && <p className="mt-3 text-xs text-[#a3423c]" role="alert">{error}</p>}
+      {message && <p className="mt-3 text-xs text-[#185c43]" role="status">{message}</p>}
+    </section>
+  );
+}
+
 function OrderRow({
   order,
   isUpdating,
@@ -911,6 +1069,14 @@ function OrderRow({
             <dt className="text-[10px] font-semibold uppercase text-[#747b75]">Total</dt>
             <dd className="mt-1 text-sm font-semibold tabular-nums">
               {formatINR.format(Number(order.total_inr))}
+            </dd>
+            <dd className="mt-1 text-[10px] text-[#747b75]">
+              GST / Tax {Number(order.tax_rate_percent)}% ·{" "}
+              {new Intl.NumberFormat("en-IN", {
+                style: "currency",
+                currency: "INR",
+                maximumFractionDigits: 2,
+              }).format(Number(order.tax_amount_inr))}
             </dd>
           </div>
           <div>

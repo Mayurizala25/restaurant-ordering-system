@@ -5,7 +5,7 @@ import {
   verifyAdminSessionToken,
 } from "../../../lib/admin-session";
 
-const MAX_BODY_BYTES = 16_384;
+const MAX_BODY_BYTES = 131_072;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PHONE_PATTERN = /^\+?[0-9][0-9 ()-]{5,18}[0-9]$/;
@@ -20,6 +20,8 @@ const UPDATABLE_ORDER_STATUSES = [
 type OrderLineInput = {
   itemId: string;
   quantity: number;
+  spiceLevel: "Mild" | "Medium" | "Spicy";
+  specialInstructions: string;
 };
 
 type OrderInput = {
@@ -27,6 +29,7 @@ type OrderInput = {
   customerPhone: string;
   tableNumber: number;
   requestId: string;
+  couponCode: string | null;
   items: OrderLineInput[];
 };
 
@@ -34,10 +37,50 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function getOrderRpcFailureMessage(value: unknown): string {
+  if (!isRecord(value) || value.code !== "P0001" || typeof value.message !== "string") {
+    return "The order could not be validated. Refresh the menu and check your cart.";
+  }
+
+  const message = value.message.replace(/^P0001:\s*/, "").trim();
+  switch (message) {
+    case "Table is unavailable.":
+      return "The selected table is no longer available. Refresh the menu and choose an active table.";
+    case "An item is unavailable.":
+      return "One or more items in your cart are no longer available. Refresh the menu and review your cart.";
+    case "Restaurant is unavailable.":
+      return "The restaurant is currently unavailable. Please try again later.";
+    case "Coupon code is invalid.":
+      return "That coupon code is invalid. Check the code or remove it and try again.";
+    case "Coupon is disabled.":
+      return "That coupon is no longer active. Remove it and try again.";
+    case "Coupon has expired.":
+      return "That coupon has expired. Remove it and try again.";
+    case "Coupon usage limit has been reached.":
+      return "That coupon has reached its usage limit. Remove it and try again.";
+    case "Coupon could not be applied.":
+      return "That coupon could not be applied. Remove it and try again.";
+    case "Invalid customer name.":
+      return "Enter a valid customer name.";
+    case "Invalid phone number.":
+      return "Enter a valid phone number.";
+    case "Invalid table number.":
+      return "Enter an active table number.";
+    case "Invalid order items.":
+      return "Your cart could not be validated. Refresh the menu and review your cart.";
+    case "Duplicate order items.":
+      return "Your cart contains duplicate items. Refresh the cart and try again.";
+    default:
+      return message.startsWith("Minimum order value for this coupon is ")
+        ? "Your order does not meet this coupon's minimum order value."
+        : "The order could not be validated. Refresh the menu and check your cart.";
+  }
+}
+
 function validateOrderInput(value: unknown): OrderInput | null {
   if (!isRecord(value)) return null;
 
-  const { customerName, customerPhone, tableNumber, requestId, items } = value;
+  const { customerName, customerPhone, tableNumber, requestId, couponCode, items } = value;
   if (
     typeof customerName !== "string" ||
     customerName.trim().length < 1 ||
@@ -54,7 +97,10 @@ function validateOrderInput(value: unknown): OrderInput | null {
     !UUID_PATTERN.test(requestId) ||
     !Array.isArray(items) ||
     items.length < 1 ||
-    items.length > 50
+    items.length > 50 ||
+    (couponCode !== undefined &&
+      couponCode !== null &&
+      (typeof couponCode !== "string" || couponCode.length > 32))
   ) {
     return null;
   }
@@ -71,6 +117,13 @@ function validateOrderInput(value: unknown): OrderInput | null {
       !Number.isSafeInteger(item.quantity) ||
       item.quantity < 1 ||
       item.quantity > 99 ||
+      (item.spiceLevel !== undefined &&
+        item.spiceLevel !== "Mild" &&
+        item.spiceLevel !== "Medium" &&
+        item.spiceLevel !== "Spicy") ||
+      (item.specialInstructions !== undefined &&
+        (typeof item.specialInstructions !== "string" ||
+          item.specialInstructions.length > 500)) ||
       itemIds.has(item.itemId)
     ) {
       return null;
@@ -82,6 +135,14 @@ function validateOrderInput(value: unknown): OrderInput | null {
     parsedItems.push({
       itemId,
       quantity: item.quantity,
+      spiceLevel:
+        item.spiceLevel === "Medium" || item.spiceLevel === "Spicy"
+          ? item.spiceLevel
+          : "Mild",
+      specialInstructions:
+        typeof item.specialInstructions === "string"
+          ? item.specialInstructions.trim()
+          : "",
     });
   }
 
@@ -90,6 +151,8 @@ function validateOrderInput(value: unknown): OrderInput | null {
     customerPhone: customerPhone.trim(),
     tableNumber,
     requestId,
+    couponCode:
+      typeof couponCode === "string" ? couponCode.trim().toUpperCase() || null : null,
     items: parsedItems,
   };
 }
@@ -155,7 +218,7 @@ export async function GET() {
   ordersUrl.searchParams.set("restaurant_id", `eq.${restaurantId}`);
   ordersUrl.searchParams.set(
     "select",
-    "id,status,total_inr,created_at,restaurant_tables(table_number,name),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr,menu_item:restaurant_menu_items(image_url))",
+    "id,status,total_inr,tax_rate_percent,tax_amount_inr,coupon_code,coupon_discount_inr,created_at,restaurant_tables(table_number,name),restaurant_order_items(id,item_name,unit_price_inr,quantity,line_total_inr,spice_level,special_instructions,menu_item:restaurant_menu_items(image_url))",
   );
   ordersUrl.searchParams.set("order", "created_at.desc");
 
@@ -168,16 +231,21 @@ export async function GET() {
       signal: timeoutSignal,
       headers: {
         apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
         Accept: "application/json",
       },
     });
-  } catch {
+  } catch (cause) {
+    const message = timeoutSignal.aborted
+      ? "Loading orders timed out. Try again."
+      : "Could not connect to the order database. Try again.";
+    console.error("Supabase order query failed.", {
+      reason:
+        cause instanceof Error ? cause.message : "Unknown network error.",
+      timedOut: timeoutSignal.aborted,
+    });
     return Response.json(
-      {
-        error: timeoutSignal.aborted
-          ? "Loading orders timed out. Try again."
-          : "Could not load orders.",
-      },
+      { error: message },
       {
         status: timeoutSignal.aborted ? 504 : 502,
         headers: { "Cache-Control": "no-store" },
@@ -186,8 +254,26 @@ export async function GET() {
   }
 
   if (!response.ok) {
+    const upstreamError: unknown = await response.json().catch(() => null);
+    const errorCode =
+      isRecord(upstreamError) && typeof upstreamError.code === "string"
+        ? upstreamError.code
+        : null;
+    const errorMessage =
+      isRecord(upstreamError) && typeof upstreamError.message === "string"
+        ? upstreamError.message.replace(/[\r\n\t]+/g, " ").trim().slice(0, 400)
+        : "";
+    console.error("Supabase order query returned an error.", {
+      status: response.status,
+      code: errorCode,
+      message: errorMessage || "No error message was returned.",
+    });
     return Response.json(
-      { error: "Could not load orders." },
+      {
+        error: errorMessage
+          ? `Could not load orders: ${errorMessage}`
+          : `Could not load orders (database returned HTTP ${response.status}).`,
+      },
       { status: 502, headers: { "Cache-Control": "no-store" } },
     );
   }
@@ -343,6 +429,7 @@ export async function PATCH(request: Request) {
       cache: "no-store",
       headers: {
         apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
         Accept: "application/json",
         "Content-Type": "application/json",
         Prefer: "return=representation",
@@ -542,6 +629,7 @@ export async function POST(request: Request) {
         p_customer_phone: order.customerPhone,
         p_table_number: order.tableNumber,
         p_items: order.items,
+        p_coupon_code: order.couponCode ?? "",
       }),
     });
   } catch (cause) {
@@ -556,7 +644,29 @@ export async function POST(request: Request) {
   }
 
   if (!response.ok) {
-    console.error("Supabase order RPC returned HTTP", response.status);
+    let rpcError: unknown = null;
+    try {
+      rpcError = await response.json();
+    } catch (cause) {
+      console.error(
+        "Supabase order RPC returned an unreadable error response.",
+        cause instanceof Error ? cause.message : "Unknown response error.",
+      );
+    }
+    const rpcErrorCode =
+      isRecord(rpcError) && typeof rpcError.code === "string"
+        ? rpcError.code
+        : null;
+    const rpcErrorMessage =
+      isRecord(rpcError) && typeof rpcError.message === "string"
+        ? rpcError.message.replace(/[\r\n\t]+/g, " ").slice(0, 250)
+        : null;
+    const failureMessage = getOrderRpcFailureMessage(rpcError);
+    console.error("Supabase order RPC returned HTTP", response.status, {
+      code: rpcErrorCode,
+      message: rpcErrorMessage,
+      failureMessage,
+    });
     const configurationError =
       response.status === 404 || response.status === 401 || response.status === 403;
     const temporaryError = response.status >= 500 || response.status === 429;
@@ -567,7 +677,7 @@ export async function POST(request: Request) {
             ? "Order submission is not configured correctly."
             : temporaryError
               ? "We could not confirm the order. Please retry using the same cart."
-              : "A menu item or table is unavailable. Refresh the menu and try again.",
+              : failureMessage,
       },
       {
         status:
@@ -593,7 +703,25 @@ export async function POST(request: Request) {
     typeof result.order_id !== "string" ||
     !UUID_PATTERN.test(result.order_id) ||
     !Number.isFinite(Number(result.total)) ||
-    Number(result.total) < 0
+    Number(result.total) < 0 ||
+    !Number.isFinite(Number(result.subtotal)) ||
+    Number(result.subtotal) < 0 ||
+    !Number.isFinite(Number(result.tax_rate_percent)) ||
+    Number(result.tax_rate_percent) < 0 ||
+    Number(result.tax_rate_percent) > 100 ||
+    Number(Number(result.tax_rate_percent).toFixed(2)) !==
+      Number(result.tax_rate_percent) ||
+    !Number.isFinite(Number(result.tax_amount)) ||
+    Number(result.tax_amount) < 0 ||
+    !Number.isFinite(Number(result.discount_amount)) ||
+    Number(result.discount_amount) < 0 ||
+    (result.coupon_code != null &&
+      (typeof result.coupon_code !== "string" ||
+        result.coupon_code.length < 1 ||
+        result.coupon_code.length > 32)) ||
+    Math.round(
+      (Number(result.subtotal) - Number(result.discount_amount) + Number(result.tax_amount)) * 100,
+    ) !== Math.round(Number(result.total) * 100)
   ) {
     console.error("Supabase order RPC returned an invalid order confirmation.");
     return Response.json({ error: "We could not confirm the order. Please retry." }, { status: 502 });
@@ -631,6 +759,7 @@ export async function POST(request: Request) {
       cache: "no-store",
       headers: {
         apikey: supabaseServiceRoleKey,
+        Authorization: `Bearer ${supabaseServiceRoleKey}`,
         "Content-Type": "application/json",
         Prefer: "return=representation",
         Accept: "application/json",
@@ -718,6 +847,12 @@ export async function POST(request: Request) {
   return Response.json(
     {
       orderId: result.order_id,
+      subtotal: Number(result.subtotal),
+      taxRatePercent: Number(result.tax_rate_percent),
+      taxAmount: Number(result.tax_amount),
+      discountAmount: Number(result.discount_amount),
+      couponCode:
+        typeof result.coupon_code === "string" ? result.coupon_code : null,
       total: Number(result.total),
       trackingToken,
     },

@@ -1,7 +1,7 @@
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const noStoreHeaders = { "Cache-Control": "no-store" };
-type MenuResource = "categories" | "items" | "tables";
+type MenuResource = "categories" | "items" | "tables" | "restaurant";
 
 function jsonError(message: string, status: number) {
   return Response.json({ error: message }, { status, headers: noStoreHeaders });
@@ -66,11 +66,13 @@ export async function GET() {
   let categoriesUrl: URL;
   let itemsUrl: URL;
   let tablesUrl: URL;
+  let restaurantUrl: URL;
   try {
     categoriesUrl = new URL("/rest/v1/restaurant_categories", supabaseUrl);
     itemsUrl = new URL("/rest/v1/restaurant_menu_items", supabaseUrl);
     tablesUrl = new URL("/rest/v1/restaurant_tables", supabaseUrl);
-    for (const url of [categoriesUrl, itemsUrl, tablesUrl]) {
+    restaurantUrl = new URL("/rest/v1/restaurant_restaurants", supabaseUrl);
+    for (const url of [categoriesUrl, itemsUrl, tablesUrl, restaurantUrl]) {
       const isLoopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
       if (
         (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopback)) ||
@@ -84,7 +86,11 @@ export async function GET() {
     return jsonError("The restaurant menu is not configured.", 503);
   }
 
-  const headers = { apikey: serviceRoleKey, Accept: "application/json" };
+  const headers = {
+    apikey: serviceRoleKey,
+    Authorization: `Bearer ${serviceRoleKey}`,
+    Accept: "application/json",
+  };
   categoriesUrl.searchParams.set(
     "select",
     "id,name,description,image_url,sort_order",
@@ -107,25 +113,41 @@ export async function GET() {
   tablesUrl.searchParams.set("restaurant_id", `eq.${restaurantId}`);
   tablesUrl.searchParams.set("is_active", "eq.true");
   tablesUrl.searchParams.set("order", "table_number.asc");
+  restaurantUrl.searchParams.set("select", "id,tax_rate_percent");
+  restaurantUrl.searchParams.set("id", `eq.${restaurantId}`);
+  restaurantUrl.searchParams.set("limit", "1");
 
   let categoriesResponse: Response;
   let itemsResponse: Response;
   let tablesResponse: Response;
+  let restaurantResponse: Response;
   const signal = AbortSignal.timeout(15_000);
   try {
-    [categoriesResponse, itemsResponse, tablesResponse] = await Promise.all([
+    [
+      categoriesResponse,
+      itemsResponse,
+      tablesResponse,
+      restaurantResponse,
+    ] = await Promise.all([
       fetchMenuResource("categories", categoriesUrl, headers, signal),
       fetchMenuResource("items", itemsUrl, headers, signal),
       fetchMenuResource("tables", tablesUrl, headers, signal),
+      fetchMenuResource("restaurant", restaurantUrl, headers, signal),
     ]);
   } catch {
     return jsonError("Could not load the restaurant menu.", 502);
   }
-  if (!categoriesResponse.ok || !itemsResponse.ok || !tablesResponse.ok) {
+  if (
+    !categoriesResponse.ok ||
+    !itemsResponse.ok ||
+    !tablesResponse.ok ||
+    !restaurantResponse.ok
+  ) {
     for (const [resource, response] of [
       ["categories", categoriesResponse],
       ["items", itemsResponse],
       ["tables", tablesResponse],
+      ["restaurant", restaurantResponse],
     ] as const) {
       if (!response.ok) {
         console.error("Supabase menu read returned a non-success status", {
@@ -140,13 +162,15 @@ export async function GET() {
   let categories: unknown;
   let items: unknown;
   let tables: unknown;
+  let restaurants: unknown;
   const menuResponses: [MenuResource, Response][] = [
     ["categories", categoriesResponse],
     ["items", itemsResponse],
     ["tables", tablesResponse],
+    ["restaurant", restaurantResponse],
   ];
   try {
-    [categories, items, tables] = await Promise.all(
+    [categories, items, tables, restaurants] = await Promise.all(
       menuResponses.map(async ([resource, response]) => {
         const startedAt = Date.now();
         try {
@@ -168,9 +192,22 @@ export async function GET() {
   if (
     !Array.isArray(categories) ||
     !Array.isArray(items) ||
-    !Array.isArray(tables)
+    !Array.isArray(tables) ||
+    !Array.isArray(restaurants) ||
+    restaurants.length !== 1 ||
+    !isRecord(restaurants[0]) ||
+    restaurants[0].id !== restaurantId ||
+    (typeof restaurants[0].tax_rate_percent !== "string" &&
+      typeof restaurants[0].tax_rate_percent !== "number") ||
+    !Number.isFinite(Number(restaurants[0].tax_rate_percent)) ||
+    Number(restaurants[0].tax_rate_percent) < 0 ||
+    Number(restaurants[0].tax_rate_percent) > 100
   ) {
     return jsonError("The restaurant menu response could not be read.", 502);
+  }
+  const taxRatePercent = Number(restaurants[0].tax_rate_percent);
+  if (Number(taxRatePercent.toFixed(2)) !== taxRatePercent) {
+    return jsonError("The restaurant menu contains an invalid tax rate.", 502);
   }
 
   const categoryIds = new Set<string>();
@@ -257,6 +294,7 @@ export async function GET() {
       categories: mappedCategories,
       menuItems: mappedItems,
       tables: mappedTables,
+      taxRatePercent,
     },
     { headers: noStoreHeaders },
   );

@@ -15,6 +15,8 @@ type OrderItemRecord = {
   id: string;
   item_name: string;
   quantity: number;
+  spice_level: "Mild" | "Medium" | "Spicy";
+  special_instructions: string;
   unit_price_inr: number | string;
   line_total_inr: number | string;
   menu_item:
@@ -86,6 +88,10 @@ function isOrderItemRecord(value: unknown): value is OrderItemRecord {
     typeof value.quantity === "number" &&
     Number.isSafeInteger(value.quantity) &&
     value.quantity > 0 &&
+    (value.spice_level === "Mild" ||
+      value.spice_level === "Medium" ||
+      value.spice_level === "Spicy") &&
+    typeof value.special_instructions === "string" &&
     (typeof value.unit_price_inr === "number" ||
       typeof value.unit_price_inr === "string") &&
     Number.isFinite(Number(value.unit_price_inr)) &&
@@ -510,6 +516,10 @@ export default function KitchenOrderDetailClient({
                         <div className="k-detail-item-copy">
                           <h3>{item.item_name}</h3>
                           <p>{currency.format(Number(item.unit_price_inr))} each</p>
+                          <p>Spice: {item.spice_level}</p>
+                          {item.special_instructions && (
+                            <p>Note: {item.special_instructions}</p>
+                          )}
                         </div>
                         <strong className="k-detail-item-total">
                           {currency.format(Number(item.line_total_inr))}

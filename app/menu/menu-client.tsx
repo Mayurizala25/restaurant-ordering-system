@@ -12,12 +12,14 @@ import {
 import CustomerThemeToggle from "../customer/customer-theme-toggle";
 
 const CART_STORAGE_KEY = "virtual-rudra.order.cart";
+const CUSTOMER_DETAILS_STORAGE_KEY = "virtual-rudra.customer.details";
 const ORDER_CONFIRMATION_STORAGE_KEY = "virtual-rudra.order.confirmation";
 const PENDING_ORDER_REQUEST_STORAGE_KEY = "virtual-rudra.order.pending-request";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const MAX_ORDER_QUANTITY = 99;
 const MAX_ORDER_LINES = 50;
+const MAX_SPECIAL_INSTRUCTIONS = 500;
 const VEGETARIAN_ITEM_IDS = new Set([
   "item-paneer-tikka",
   "item-samosa",
@@ -43,9 +45,16 @@ type MenuData = {
   categories: DemoCategory[];
   menuItems: DemoMenuItem[];
   tables: DemoTable[];
+  taxRatePercent: number;
 };
 
-type CartLine = { itemId: string; quantity: number };
+type SpiceLevel = "Mild" | "Medium" | "Spicy";
+type CartLine = {
+  itemId: string;
+  quantity: number;
+  spiceLevel: SpiceLevel;
+  specialInstructions: string;
+};
 type HeroSlide = {
   id: string;
   kicker: string;
@@ -60,8 +69,21 @@ type OrderConfirmation = {
   trackingToken: string;
   customerName: string;
   customerPhone: string;
+  customerDetailsSaveNotice?: string;
   tableNumber: number;
-  items: { itemId: string; name: string; quantity: number; unitPrice: number }[];
+  items: {
+    itemId: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    spiceLevel?: SpiceLevel;
+    specialInstructions?: string;
+  }[];
+  subtotal?: number;
+  discountAmount?: number;
+  couponCode?: string | null;
+  taxRatePercent?: number;
+  taxAmount?: number;
   total: number;
 };
 
@@ -74,6 +96,8 @@ function isOrderConfirmation(value: unknown): value is OrderConfirmation {
     /^[0-9a-f]{64}$/.test(value.trackingToken) &&
     typeof value.customerName === "string" &&
     typeof value.customerPhone === "string" &&
+    (value.customerDetailsSaveNotice === undefined ||
+      typeof value.customerDetailsSaveNotice === "string") &&
     Number.isSafeInteger(value.tableNumber) &&
     Array.isArray(value.items) &&
     value.items.length > 0 &&
@@ -85,8 +109,34 @@ function isOrderConfirmation(value: unknown): value is OrderConfirmation {
         Number.isSafeInteger(item.quantity) &&
         typeof item.unitPrice === "number" &&
         Number.isFinite(item.unitPrice) &&
-        item.unitPrice >= 0,
+        item.unitPrice >= 0 &&
+        (item.spiceLevel === undefined || isSpiceLevel(item.spiceLevel)) &&
+        (item.specialInstructions === undefined ||
+          (typeof item.specialInstructions === "string" &&
+            item.specialInstructions.length <= MAX_SPECIAL_INSTRUCTIONS)),
     ) &&
+    (value.subtotal === undefined ||
+      (typeof value.subtotal === "number" &&
+        Number.isFinite(value.subtotal) &&
+        value.subtotal >= 0)) &&
+    (value.discountAmount === undefined ||
+      (typeof value.discountAmount === "number" &&
+        Number.isFinite(value.discountAmount) &&
+        value.discountAmount >= 0)) &&
+    (value.couponCode === undefined ||
+      value.couponCode === null ||
+      (typeof value.couponCode === "string" &&
+        value.couponCode.length > 0 &&
+        value.couponCode.length <= 32)) &&
+    (value.taxRatePercent === undefined ||
+      (typeof value.taxRatePercent === "number" &&
+        Number.isFinite(value.taxRatePercent) &&
+        value.taxRatePercent >= 0 &&
+        value.taxRatePercent <= 100)) &&
+    (value.taxAmount === undefined ||
+      (typeof value.taxAmount === "number" &&
+        Number.isFinite(value.taxAmount) &&
+        value.taxAmount >= 0)) &&
     typeof value.total === "number" &&
     Number.isFinite(value.total) &&
     value.total >= 0
@@ -101,11 +151,38 @@ type OrderRequest = {
   items: CartLine[];
 };
 
+function isSpiceLevel(value: unknown): value is SpiceLevel {
+  return value === "Mild" || value === "Medium" || value === "Spicy";
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isCartLine(value: unknown): value is CartLine {
+function isStoredCustomerDetails(
+  value: unknown,
+): value is { version: 1; name: string; phone: string } {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    typeof value.name === "string" &&
+    value.name.trim().length > 0 &&
+    value.name.length <= 100 &&
+    typeof value.phone === "string" &&
+    /^\+?[0-9][0-9 ()-]{5,18}[0-9]$/.test(value.phone) &&
+    value.phone.replace(/\D/g, "").length >= 7 &&
+    value.phone.replace(/\D/g, "").length <= 15
+  );
+}
+
+function calculateTaxAmount(subtotal: number, taxRatePercent: number) {
+  return Math.round(Math.round(subtotal * 100) / 100 * taxRatePercent) / 100;
+}
+
+function isStoredCartLine(
+  value: unknown,
+): value is Omit<CartLine, "spiceLevel" | "specialInstructions"> &
+  Partial<Pick<CartLine, "spiceLevel" | "specialInstructions">> {
   return (
     isRecord(value) &&
     typeof value.itemId === "string" &&
@@ -114,7 +191,11 @@ function isCartLine(value: unknown): value is CartLine {
     typeof value.quantity === "number" &&
     Number.isSafeInteger(value.quantity) &&
     value.quantity >= 1 &&
-    value.quantity <= MAX_ORDER_QUANTITY
+    value.quantity <= MAX_ORDER_QUANTITY &&
+    (value.spiceLevel === undefined || isSpiceLevel(value.spiceLevel)) &&
+    (value.specialInstructions === undefined ||
+      (typeof value.specialInstructions === "string" &&
+        value.specialInstructions.length <= MAX_SPECIAL_INSTRUCTIONS))
   );
 }
 
@@ -193,14 +274,18 @@ function readCart(): CartLine[] {
   if (!Array.isArray(parsed) || parsed.length > MAX_ORDER_LINES) {
     throw new Error("Your saved cart is invalid. Add the items again to continue.");
   }
-  if (!parsed.every(isCartLine)) {
+  if (!parsed.every(isStoredCartLine)) {
     throw new Error("Your saved cart is invalid. Add the items again to continue.");
   }
   if (new Set(parsed.map((line) => line.itemId)).size !== parsed.length) {
     throw new Error("Your saved cart contains duplicate items. Add them again to continue.");
   }
 
-  return parsed;
+  return parsed.map((line) => ({
+    ...line,
+    spiceLevel: line.spiceLevel ?? "Mild",
+    specialInstructions: line.specialInstructions ?? "",
+  }));
 }
 
 function createOrderRequestId(): string {
@@ -297,6 +382,10 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const [filterOpen, setFilterOpen] = useState(false);
   const [heroSlideIndex, setHeroSlideIndex] = useState(0);
   const [selectedDish, setSelectedDish] = useState<DemoMenuItem | null>(null);
+  const [customizationQuantity, setCustomizationQuantity] = useState(1);
+  const [customizationSpiceLevel, setCustomizationSpiceLevel] =
+    useState<SpiceLevel>("Mild");
+  const [customizationInstructions, setCustomizationInstructions] = useState("");
   const dishDetailsRef = useRef<HTMLDialogElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const heroPointerStart = useRef<number | null>(null);
@@ -306,10 +395,17 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const [cartStorageError, setCartStorageError] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerDetailsNotice, setCustomerDetailsNotice] = useState("");
   const [checkoutTableNumber, setCheckoutTableNumber] = useState("");
+  const [couponCode, setCouponCode] = useState("");
+  const [appliedCouponCode, setAppliedCouponCode] = useState<string | null>(null);
+  const [couponDiscountAmount, setCouponDiscountAmount] = useState(0);
+  const [couponMessage, setCouponMessage] = useState("");
+  const [isApplyingCoupon, setIsApplyingCoupon] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState("");
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const submissionLock = useRef(false);
+  const customerDetailsLoaded = useRef(false);
   const [orderConfirmation, setOrderConfirmation] = useState<OrderConfirmation | null>(null);
   const pendingOrderRequest = useRef<{ key: string; requestId: string } | null>(null);
   const [confirmationReady, setConfirmationReady] = useState(page !== "thank-you");
@@ -334,7 +430,10 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
     const refreshMenu = async () => {
       const requestId = ++latestMenuRequest;
       try {
-        const response = await fetch("/api/menu", { cache: "no-store" });
+        const response = await fetch("/api/menu", {
+          cache: "no-store",
+          signal: AbortSignal.timeout(12_000),
+        });
         let payload: unknown;
         try {
           payload = await response.json();
@@ -355,7 +454,11 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
           !Array.isArray(payload.menuItems) ||
           !payload.menuItems.every(isMenuItem) ||
           !Array.isArray(payload.tables) ||
-          !payload.tables.every(isTable)
+          !payload.tables.every(isTable) ||
+          typeof payload.taxRatePercent !== "number" ||
+          !Number.isFinite(payload.taxRatePercent) ||
+          payload.taxRatePercent < 0 ||
+          payload.taxRatePercent > 100
         ) {
           throw new Error("The restaurant menu response could not be read.");
         }
@@ -372,6 +475,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
           categories: payload.categories,
           menuItems: payload.menuItems,
           tables: payload.tables,
+          taxRatePercent: payload.taxRatePercent,
         });
         setLoadError("");
       } catch (cause) {
@@ -417,6 +521,28 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       setQrTableNumber(parseTableNumber(params.get("tableNumber")));
       recordTableQrScan(scannedTableId);
       void refreshMenu();
+      if (page === "checkout" && !customerDetailsLoaded.current) {
+        customerDetailsLoaded.current = true;
+        try {
+          const serializedDetails = window.localStorage.getItem(
+            CUSTOMER_DETAILS_STORAGE_KEY,
+          );
+          if (serializedDetails) {
+            const savedDetails: unknown = JSON.parse(serializedDetails);
+            if (!isStoredCustomerDetails(savedDetails)) {
+              throw new Error("Saved customer details are invalid.");
+            }
+            setCustomerName(savedDetails.name);
+            setCustomerPhone(savedDetails.phone);
+          }
+        } catch (cause) {
+          setCustomerDetailsNotice(
+            cause instanceof Error
+              ? `Saved details could not be loaded: ${cause.message}`
+              : "Saved details could not be loaded from this browser.",
+          );
+        }
+      }
       if (page === "thank-you") {
         try {
           const serializedOrder = window.sessionStorage.getItem(
@@ -595,11 +721,29 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
   const cartItemCount = cartItems.reduce((count, line) => count + line.quantity, 0);
   const confirmedItemCount =
     orderConfirmation?.items.reduce((count, item) => count + item.quantity, 0) ?? 0;
-  const subtotal = cartItems.reduce(
-    (total, line) =>
-      total + (line.isUnavailable ? 0 : line.item.priceINR * line.quantity),
-    0,
-  );
+  const subtotal =
+    Math.round(
+      cartItems.reduce(
+        (total, line) =>
+          total + (line.isUnavailable ? 0 : line.item.priceINR * line.quantity),
+        0,
+      ) * 100,
+    ) / 100;
+  const checkoutSubtotal = orderConfirmation?.subtotal ?? subtotal;
+  const checkoutDiscountAmount =
+    orderConfirmation?.discountAmount ?? couponDiscountAmount;
+  const checkoutCouponCode =
+    orderConfirmation?.couponCode ?? appliedCouponCode;
+  const checkoutTaxableAmount =
+    Math.round(Math.max(0, checkoutSubtotal - checkoutDiscountAmount) * 100) / 100;
+  const checkoutTaxRatePercent =
+    orderConfirmation?.taxRatePercent ?? data?.taxRatePercent ?? 0;
+  const checkoutTaxAmount =
+    orderConfirmation?.taxAmount ??
+    calculateTaxAmount(checkoutTaxableAmount, checkoutTaxRatePercent);
+  const checkoutTotal =
+    orderConfirmation?.total ??
+    Math.round((checkoutTaxableAmount + checkoutTaxAmount) * 100) / 100;
   const selectedTable = data?.tables.find((table) => table.id === tableId);
   const tableNumber = selectedTable?.tableNumber ?? null;
   const tableNumberMismatch =
@@ -625,13 +769,23 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
     );
   };
 
-  const addToCart = (item: DemoMenuItem) => {
+  const openDishCustomization = (item: DemoMenuItem) => {
     if (!item.isAvailable || isSubmittingOrder) return;
+    const existingLine = cart.find((line) => line.itemId === item.id);
+    setCustomizationQuantity(existingLine?.quantity ?? 1);
+    setCustomizationSpiceLevel(existingLine?.spiceLevel ?? "Mild");
+    setCustomizationInstructions(existingLine?.specialInstructions ?? "");
+    setSelectedDish(item);
+  };
+  const saveDishCustomization = () => {
+    if (!selectedDish?.isAvailable || isSubmittingOrder) return;
     submissionLock.current = false;
     setOrderConfirmation(null);
-    const existingLine = cart.find((line) => line.itemId === item.id);
+    const existingLine = cart.find((line) => line.itemId === selectedDish.id);
     if (
-      (existingLine && existingLine.quantity >= MAX_ORDER_QUANTITY) ||
+      (existingLine && !Number.isSafeInteger(customizationQuantity)) ||
+      customizationQuantity < 1 ||
+      customizationQuantity > MAX_ORDER_QUANTITY ||
       (!existingLine && cart.length >= MAX_ORDER_LINES)
     ) {
       return;
@@ -639,12 +793,26 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
     updateCart(
       existingLine
         ? cart.map((line) =>
-            line.itemId === item.id
-              ? { ...line, quantity: line.quantity + 1 }
+            line.itemId === selectedDish.id
+              ? {
+                  ...line,
+                  quantity: customizationQuantity,
+                  spiceLevel: customizationSpiceLevel,
+                  specialInstructions: customizationInstructions.trim(),
+                }
               : line,
           )
-        : [...cart, { itemId: item.id, quantity: 1 }],
+        : [
+            ...cart,
+            {
+              itemId: selectedDish.id,
+              quantity: customizationQuantity,
+              spiceLevel: customizationSpiceLevel,
+              specialInstructions: customizationInstructions.trim(),
+            },
+          ],
     );
+    setSelectedDish(null);
   };
   const changeCartQuantity = (itemId: string, change: number) => {
     if (isSubmittingOrder) return;
@@ -668,6 +836,48 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
     setOrderConfirmation(null);
     updateCart(cart.filter((line) => line.itemId !== itemId));
   };
+  const applyCoupon = async () => {
+    if (!couponCode.trim() || cartItems.length === 0) return;
+    setIsApplyingCoupon(true);
+    setCouponMessage("");
+    try {
+      const response = await fetch("/api/coupons/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ code: couponCode.trim(), subtotal }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (
+        !response.ok ||
+        !isRecord(payload) ||
+        typeof payload.couponCode !== "string" ||
+        typeof payload.discountAmount !== "number" ||
+        !Number.isFinite(payload.discountAmount) ||
+        payload.discountAmount < 0
+      ) {
+        setAppliedCouponCode(null);
+        setCouponDiscountAmount(0);
+        setCouponMessage(
+          isRecord(payload) && typeof payload.error === "string"
+            ? payload.error
+            : "Coupon could not be applied.",
+        );
+        return;
+      }
+      setAppliedCouponCode(payload.couponCode);
+      setCouponDiscountAmount(payload.discountAmount);
+      setCouponCode(payload.couponCode);
+      setCouponMessage(
+        `Coupon ${payload.couponCode} applied · ${formatINR.format(payload.discountAmount)} off`,
+      );
+    } catch {
+      setCouponMessage("Coupon could not be applied. Try again.");
+    } finally {
+      setIsApplyingCoupon(false);
+    }
+  };
+
   const handleCheckout = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submissionLock.current || orderConfirmation) return;
@@ -715,7 +925,14 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
       tableNumber: parsedTableNumber,
-      items: cart.map(({ itemId, quantity }) => ({ itemId, quantity })),
+      items: cart.map(
+        ({ itemId, quantity, spiceLevel, specialInstructions }) => ({
+          itemId,
+          quantity,
+          spiceLevel,
+          specialInstructions,
+        }),
+      ),
     };
     let requestKey: string;
     try {
@@ -743,6 +960,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
         body: JSON.stringify({
           ...request,
           requestId: pendingOrderRequest.current.requestId,
+          couponCode: appliedCouponCode,
         }),
       });
     } catch {
@@ -770,7 +988,28 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       !/^[0-9a-f]{64}$/.test(result.trackingToken) ||
       typeof result.total !== "number" ||
       !Number.isFinite(result.total) ||
-      result.total < 0
+      result.total < 0 ||
+      typeof result.subtotal !== "number" ||
+      !Number.isFinite(result.subtotal) ||
+      result.subtotal < 0 ||
+      typeof result.taxRatePercent !== "number" ||
+      !Number.isFinite(result.taxRatePercent) ||
+      result.taxRatePercent < 0 ||
+      result.taxRatePercent > 100 ||
+      typeof result.taxAmount !== "number" ||
+      !Number.isFinite(result.taxAmount) ||
+      result.taxAmount < 0 ||
+      typeof result.discountAmount !== "number" ||
+      !Number.isFinite(result.discountAmount) ||
+      result.discountAmount < 0 ||
+      (result.couponCode !== null &&
+        (typeof result.couponCode !== "string" ||
+          result.couponCode.length < 1 ||
+          result.couponCode.length > 32)) ||
+      Math.round(
+        (result.subtotal - result.discountAmount + result.taxAmount) * 100,
+      ) !==
+        Math.round(result.total * 100)
     ) {
       submissionLock.current = false;
       setIsSubmittingOrder(false);
@@ -795,18 +1034,45 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
       return;
     }
 
+    let customerDetailsSaveNotice: string | undefined;
+    try {
+      window.localStorage.setItem(
+        CUSTOMER_DETAILS_STORAGE_KEY,
+        JSON.stringify({
+          version: 1,
+          name: request.customerName,
+          phone: request.customerPhone,
+        }),
+      );
+      setCustomerDetailsNotice("");
+    } catch (cause) {
+      customerDetailsSaveNotice =
+        "Your order is confirmed, but your details could not be saved in this browser for next time.";
+      console.error("Customer details could not be saved for checkout autofill.", cause);
+    }
+
     const order: OrderConfirmation = {
       id: result.orderId,
       trackingToken: result.trackingToken,
       customerName: request.customerName,
       customerPhone: request.customerPhone,
+      ...(customerDetailsSaveNotice ? { customerDetailsSaveNotice } : {}),
       tableNumber: request.tableNumber,
       items: cartItems.map(({ item, quantity }) => ({
         itemId: item.id,
         name: item.name,
         quantity,
         unitPrice: item.priceINR,
+        spiceLevel: cart.find((line) => line.itemId === item.id)?.spiceLevel ?? "Mild",
+        specialInstructions:
+          cart.find((line) => line.itemId === item.id)?.specialInstructions ?? "",
       })),
+      subtotal: result.subtotal,
+      discountAmount: result.discountAmount,
+      couponCode:
+        typeof result.couponCode === "string" ? result.couponCode : null,
+      taxRatePercent: result.taxRatePercent,
+      taxAmount: result.taxAmount,
       total: result.total,
     };
     try {
@@ -1230,7 +1496,9 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             ) : (
               <div className="vr-menu-cart-layout">
                 <ul className="vr-menu-cart-items">
-                  {cartItems.map(({ item, quantity, isUnavailable }) => (
+                  {cartItems.map(({ item, quantity, isUnavailable }) => {
+                    const line = cart.find((entry) => entry.itemId === item.id);
+                    return (
                     <li className="vr-menu-cart-item" key={item.id}>
                       <div className="vr-menu-cart-thumbnail">
                         {item.imageUrl ? (
@@ -1256,6 +1524,22 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                             ? "No longer available · Remove this item to continue"
                             : `${formatINR.format(item.priceINR)} each`}
                         </span>
+                        {line && (
+                          <>
+                            <small>Spice: {line.spiceLevel}</small>
+                            {line.specialInstructions && (
+                              <small>Note: {line.specialInstructions}</small>
+                            )}
+                            <button
+                              className="vr-menu-customize"
+                              disabled={isSubmittingOrder || isUnavailable}
+                              onClick={() => openDishCustomization(item)}
+                              type="button"
+                            >
+                              Customize
+                            </button>
+                          </>
+                        )}
                       </div>
                       <div className="vr-menu-cart-controls">
                         <button
@@ -1295,7 +1579,8 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                           : formatINR.format(item.priceINR * quantity)}
                       </strong>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
                 {hasUnavailableItems && (
                   <p className="vr-menu-checkout-message" role="alert">
@@ -1347,6 +1632,11 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               <p className="vr-menu-confirmation-message">
                 Your order has been received and confirmed.
               </p>
+              {orderConfirmation.customerDetailsSaveNotice && (
+                <p className="vr-menu-checkout-message" role="alert">
+                  {orderConfirmation.customerDetailsSaveNotice}
+                </p>
+              )}
             </header>
             <dl className="vr-menu-confirmation-details">
               <div>
@@ -1361,7 +1651,79 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 <dt>Table</dt>
                 <dd>Table {orderConfirmation.tableNumber}</dd>
               </div>
+              {orderConfirmation.couponCode && (
+                <div>
+                  <dt>Coupon</dt>
+                  <dd>
+                    {orderConfirmation.couponCode}
+                    {orderConfirmation.discountAmount
+                      ? ` · ${formatINR.format(orderConfirmation.discountAmount)} off`
+                      : ""}
+                  </dd>
+                </div>
+              )}
             </dl>
+            <section aria-label="Order summary" className="vr-order-summary">
+              <div className="vr-order-summary-heading">
+                <h3>Order Summary</h3>
+                <span>
+                  {confirmedItemCount} {confirmedItemCount === 1 ? "item" : "items"}
+                </span>
+              </div>
+              <ul>
+                {orderConfirmation.items.map((item) => (
+                  <li key={item.itemId}>
+                    <span className="vr-order-summary-item">
+                      <span className="vr-order-summary-item-heading">
+                        <strong>{item.name}</strong>
+                        <small>{item.quantity}×</small>
+                      </span>
+                      <span className="vr-order-summary-item-details">
+                        <small>Spice: {item.spiceLevel ?? "Mild"}</small>
+                        {item.specialInstructions && (
+                          <small>Note: {item.specialInstructions}</small>
+                        )}
+                      </span>
+                    </span>
+                    <strong>{formatINR.format(item.unitPrice * item.quantity)}</strong>
+                  </li>
+                ))}
+              </ul>
+              {(orderConfirmation.subtotal !== undefined ||
+                orderConfirmation.taxAmount !== undefined) && (
+                <dl className="vr-order-summary-totals">
+                  {orderConfirmation.subtotal !== undefined && (
+                    <div>
+                      <dt>Subtotal</dt>
+                      <dd>{formatINR.format(orderConfirmation.subtotal)}</dd>
+                    </div>
+                  )}
+                  {orderConfirmation.couponCode &&
+                    (orderConfirmation.discountAmount ?? 0) > 0 && (
+                      <div>
+                        <dt>Coupon ({orderConfirmation.couponCode})</dt>
+                        <dd>
+                          -{formatINR.format(orderConfirmation.discountAmount ?? 0)}
+                        </dd>
+                      </div>
+                    )}
+                  {orderConfirmation.taxAmount !== undefined && (
+                    <div>
+                      <dt>
+                        {orderConfirmation.taxRatePercent === undefined
+                          ? "GST / Tax"
+                          : `GST (${orderConfirmation.taxRatePercent}%)`}
+                      </dt>
+                      <dd>{formatINR.format(orderConfirmation.taxAmount)}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
+              <div className="vr-order-summary-total">
+                <span>Grand Total</span>
+                <strong>{formatINR.format(orderConfirmation.total)}</strong>
+              </div>
+            </section>
             <div className="vr-order-confirmation-actions">
               <Link
                 className="vr-order-confirmation-action vr-order-confirmation-track"
@@ -1377,83 +1739,61 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               >
                 Download Invoice
               </Link>
-              <Link className="vr-order-confirmation-menu" href={tableHref("/menu")}>
-                Back to Menu
-              </Link>
             </div>
-            <div className="vr-order-confirmation-content">
-              <section aria-label="Order summary" className="vr-menu-checkout-summary vr-order-summary">
-                <div className="vr-order-summary-heading">
-                  <h3>Order Summary</h3>
-                  <span>
-                    {confirmedItemCount} {confirmedItemCount === 1 ? "item" : "items"}
-                  </span>
-                </div>
-                <ul>
-                  {orderConfirmation.items.map((item) => (
-                    <li key={item.itemId}>
-                      <span>
-                        <small>{item.quantity}×</small>
-                        {item.name}
-                      </span>
-                      <strong>{formatINR.format(item.unitPrice * item.quantity)}</strong>
-                    </li>
+            <Link className="vr-order-confirmation-menu" href={tableHref("/menu")}>
+              Back to Menu
+            </Link>
+            <form
+              aria-labelledby="feedback-title"
+              className="vr-order-feedback"
+              onSubmit={handleFeedbackSubmit}
+            >
+              <h3 id="feedback-title">Share Your Experience</h3>
+              <p>How was your visit to Virtual Rudra?</p>
+              <fieldset>
+                <legend>Rate your experience</legend>
+                <div className="vr-order-feedback-stars" role="group" aria-label="Rate your experience">
+                  {[1, 2, 3, 4, 5].map((rating) => (
+                    <button
+                      aria-label={`${rating} ${rating === 1 ? "star" : "stars"}`}
+                      aria-pressed={feedbackRating === rating}
+                      className={feedbackRating >= rating ? "is-selected" : undefined}
+                      disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                      key={rating}
+                      onClick={() => setFeedbackRating(rating)}
+                      type="button"
+                    >
+                      ★
+                    </button>
                   ))}
-                </ul>
-                <div className="vr-order-summary-total">
-                  <span>Order Total</span>
-                  <strong>{formatINR.format(orderConfirmation.total)}</strong>
                 </div>
-              </section>
-              <div className="vr-order-confirmation-side">
-                <form
-                  aria-labelledby="feedback-title"
-                  className="vr-order-feedback"
-                  onSubmit={handleFeedbackSubmit}
-                >
-                  <h3 id="feedback-title">Share Your Experience</h3>
-                  <p>How was your visit to Virtual Rudra?</p>
-                  <fieldset>
-                    <legend>Rate your experience</legend>
-                    <div className="vr-order-feedback-stars" role="group" aria-label="Rate your experience">
-                      {[1, 2, 3, 4, 5].map((rating) => (
-                        <button
-                          aria-label={`${rating} ${rating === 1 ? "star" : "stars"}`}
-                          aria-pressed={feedbackRating === rating}
-                          className={feedbackRating >= rating ? "is-selected" : undefined}
-                          disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                          key={rating}
-                          onClick={() => setFeedbackRating(rating)}
-                          type="button"
-                        >
-                          ★
-                        </button>
-                      ))}
-                    </div>
-                  </fieldset>
-                  <label htmlFor="customer-feedback-comment">
-                    Comment <span>(optional)</span>
-                  </label>
-                  <textarea
-                    disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                    id="customer-feedback-comment"
-                    maxLength={1000}
-                    onChange={(event) => setFeedbackComment(event.target.value)}
-                    placeholder="Tell us about your visit"
-                    value={feedbackComment}
-                  />
-                  {feedbackError && <p className="vr-order-feedback-error" role="alert">{feedbackError}</p>}
-                  {feedbackMessage && <p className="vr-order-feedback-success" role="status">{feedbackMessage}</p>}
-                  <button
-                    className="vr-order-feedback-submit"
-                    disabled={feedbackSubmitting || Boolean(feedbackMessage)}
-                    type="submit"
-                  >
-                    {feedbackSubmitting ? "Saving feedback…" : "Submit Feedback"}
-                  </button>
-                </form>
-              </div>
-            </div>
+              </fieldset>
+              <p aria-live="polite" className="vr-order-feedback-rating">
+                {feedbackRating
+                  ? `${feedbackRating} of 5 stars selected`
+                  : "Select a star rating"}
+              </p>
+              <label htmlFor="customer-feedback-comment">
+                Comment <span>(optional)</span>
+              </label>
+              <textarea
+                disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                id="customer-feedback-comment"
+                maxLength={1000}
+                onChange={(event) => setFeedbackComment(event.target.value)}
+                placeholder="Tell us about your visit"
+                value={feedbackComment}
+              />
+              {feedbackError && <p className="vr-order-feedback-error" role="alert">{feedbackError}</p>}
+              {feedbackMessage && <p className="vr-order-feedback-success" role="status">{feedbackMessage}</p>}
+              <button
+                className="vr-order-feedback-submit"
+                disabled={feedbackSubmitting || Boolean(feedbackMessage)}
+                type="submit"
+              >
+                {feedbackSubmitting ? "Saving feedback…" : "Submit Feedback"}
+              </button>
+            </form>
           </section>
         ) : page === "thank-you" && confirmationReady ? (
           <section aria-labelledby="order-confirmation-title" className="vr-menu-confirmation">
@@ -1509,6 +1849,9 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
             </div>
             <div className="vr-menu-checkout-fields">
               <p className="vr-menu-checkout-step">01 <span>YOUR DETAILS</span></p>
+              <p className="vr-menu-confirmation-message">
+                Details are saved in this browser after a successful checkout and can be edited here.
+              </p>
               <label>
                 Customer name
                 <input
@@ -1539,6 +1882,11 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                   value={customerPhone}
                 />
               </label>
+              {customerDetailsNotice && (
+                <p className="vr-menu-checkout-message" role="alert">
+                  {customerDetailsNotice}
+                </p>
+              )}
               <label>
                 Table number
                 <input
@@ -1564,6 +1912,40 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 )}
               </label>
             </div>
+            {cartItems.length > 0 && (
+              <div className="vr-menu-coupon">
+                <label htmlFor="coupon-code">Coupon / Offer code</label>
+                <div className="vr-menu-coupon-row">
+                  <input
+                    id="coupon-code"
+                    disabled={isApplyingCoupon || orderConfirmation !== null}
+                    maxLength={32}
+                    onChange={(event) => {
+                      setCouponCode(event.target.value.toUpperCase());
+                      setCouponMessage("");
+                    }}
+                    placeholder="Enter code"
+                    value={couponCode}
+                  />
+                  <button
+                    disabled={
+                      isApplyingCoupon ||
+                      !couponCode.trim() ||
+                      orderConfirmation !== null
+                    }
+                    onClick={applyCoupon}
+                    type="button"
+                  >
+                    {isApplyingCoupon ? "Applying…" : appliedCouponCode ? "Reapply" : "Apply"}
+                  </button>
+                </div>
+                {couponMessage && (
+                  <p aria-live="polite" role="status">
+                    {couponMessage}
+                  </p>
+                )}
+              </div>
+            )}
             <div aria-label="Order summary" className="vr-menu-checkout-summary">
               <div className="vr-menu-checkout-summary-heading">
                 <div>
@@ -1579,7 +1961,9 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                 </p>
               ) : (
                 <ul>
-                  {cartItems.map(({ item, quantity }) => (
+                  {cartItems.map(({ item, quantity }) => {
+                    const line = cart.find((entry) => entry.itemId === item.id);
+                    return (
                     <li key={item.id}>
                       <span>
                         <strong>{item.name}</strong>
@@ -1588,6 +1972,14 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                             ? "Unavailable · remove from cart"
                             : `Qty ${quantity} × ${formatINR.format(item.priceINR)}`}
                         </small>
+                        {!hasUnavailableItems || item.isAvailable ? (
+                          <>
+                            <small>Spice: {line?.spiceLevel ?? "Mild"}</small>
+                            {line?.specialInstructions && (
+                              <small>Note: {line.specialInstructions}</small>
+                            )}
+                          </>
+                        ) : null}
                       </span>
                       <strong>
                         {!item.isAvailable
@@ -1595,14 +1987,29 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                           : formatINR.format(item.priceINR * quantity)}
                       </strong>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
+              <dl className="vr-menu-cart-totals">
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{formatINR.format(checkoutSubtotal)}</dd>
+                </div>
+                {checkoutCouponCode && checkoutDiscountAmount > 0 && (
+                  <div>
+                    <dt>Coupon {checkoutCouponCode}</dt>
+                    <dd>-{formatINR.format(checkoutDiscountAmount)}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt>GST ({checkoutTaxRatePercent}%)</dt>
+                  <dd>{formatINR.format(checkoutTaxAmount)}</dd>
+                </div>
+              </dl>
               <div className="vr-menu-checkout-total">
-                <span>Total</span>
-                <strong>
-                  {formatINR.format(orderConfirmation?.total ?? subtotal)}
-                </strong>
+                <span>Grand Total</span>
+                <strong>{formatINR.format(checkoutTotal)}</strong>
               </div>
             </div>
             {checkoutMessage && (
@@ -1629,7 +2036,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
               <span className="vr-menu-place-order-amount">
                 <small>TOTAL PAYABLE</small>
                 <strong>
-                  {formatINR.format(orderConfirmation?.total ?? subtotal)}
+                  {formatINR.format(checkoutTotal)}
                 </strong>
               </span>
               <span className="vr-menu-place-order-action">
@@ -1714,7 +2121,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                               <button
                                 aria-label={`View details for ${item.name}`}
                                 className="vr-menu-details-button"
-                                onClick={() => setSelectedDish(item)}
+                                onClick={() => openDishCustomization(item)}
                                 type="button"
                               >
                                 {item.name}
@@ -1757,7 +2164,7 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                                     isSubmittingOrder ||
                                     cart.length >= MAX_ORDER_LINES
                                   }
-                                  onClick={() => addToCart(item)}
+                                  onClick={() => openDishCustomization(item)}
                                   type="button"
                                 >
                                   {item.isAvailable && (
@@ -1827,25 +2234,73 @@ export default function MenuClient({ page = "menu" }: { page?: StorefrontPage })
                   )}
                   {!selectedDish.isAvailable && <span>Currently unavailable</span>}
                 </div>
+                <div className="vr-menu-customization">
+                  <fieldset>
+                    <legend>Spice level</legend>
+                    <div className="vr-menu-spice-options">
+                      {(["Mild", "Medium", "Spicy"] as const).map((level) => (
+                        <button
+                          aria-pressed={customizationSpiceLevel === level}
+                          className={customizationSpiceLevel === level ? "is-selected" : ""}
+                          key={level}
+                          onClick={() => setCustomizationSpiceLevel(level)}
+                          type="button"
+                        >
+                          {level}
+                        </button>
+                      ))}
+                    </div>
+                  </fieldset>
+                  <div className="vr-menu-customization-row">
+                    <span>Quantity</span>
+                    <div className="vr-menu-item-quantity">
+                      <button
+                        aria-label="Decrease quantity"
+                        disabled={customizationQuantity <= 1}
+                        onClick={() => setCustomizationQuantity((quantity) => Math.max(1, quantity - 1))}
+                        type="button"
+                      >
+                        −
+                      </button>
+                      <span aria-live="polite">{customizationQuantity}</span>
+                      <button
+                        aria-label="Increase quantity"
+                        disabled={customizationQuantity >= MAX_ORDER_QUANTITY}
+                        onClick={() => setCustomizationQuantity((quantity) => Math.min(MAX_ORDER_QUANTITY, quantity + 1))}
+                        type="button"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <label>
+                    Special instructions <span>(optional)</span>
+                    <textarea
+                      maxLength={MAX_SPECIAL_INSTRUCTIONS}
+                      onChange={(event) => setCustomizationInstructions(event.target.value)}
+                      placeholder="Any requests for the kitchen?"
+                      value={customizationInstructions}
+                    />
+                  </label>
+                </div>
                 <div className="vr-menu-dish-dialog-action">
-                  <strong>{formatINR.format(selectedDish.priceINR)}</strong>
+                  <strong>{formatINR.format(selectedDish.priceINR * customizationQuantity)}</strong>
                   <button
                     className="vr-menu-place-order"
                     disabled={
                       !selectedDish.isAvailable ||
                       isSubmittingOrder ||
-                      (cart.find((line) => line.itemId === selectedDish.id)
-                        ?.quantity ?? 0) >= MAX_ORDER_QUANTITY ||
                       (!cart.some((line) => line.itemId === selectedDish.id) &&
                         cart.length >= MAX_ORDER_LINES)
                     }
-                    onClick={() => {
-                      addToCart(selectedDish);
-                      setSelectedDish(null);
-                    }}
+                    onClick={saveDishCustomization}
                     type="button"
                   >
-                    {selectedDish.isAvailable ? "Add to order" : "Unavailable"}
+                    {selectedDish.isAvailable
+                      ? cart.some((line) => line.itemId === selectedDish.id)
+                        ? "Save changes"
+                        : "Add to order"
+                      : "Unavailable"}
                     <span aria-hidden="true">→</span>
                   </button>
                 </div>

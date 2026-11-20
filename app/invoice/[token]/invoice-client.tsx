@@ -16,6 +16,11 @@ type InvoiceOrder = {
   status: "pending" | "accepted" | "preparing" | "ready" | "served" | "cancelled";
   createdAt: string;
   customerName: string;
+  subtotal: number;
+  discountAmount: number;
+  couponCode: string | null;
+  taxRatePercent: number;
+  taxAmount: number;
   total: number;
   tableNumber: number;
   items: InvoiceItem[];
@@ -70,6 +75,10 @@ const nativePrintStyles = `
   .vr-invoice-items td { border-bottom: 1px solid #eeeae2; padding: 12px 4px; vertical-align: top; }
   .vr-invoice-item-name { display: block; font-weight: 700; }
   .vr-invoice-item-detail { display: block; margin-top: 4px; color: #716b63; font-size: 11px; }
+  .vr-invoice-tax-breakdown { display: grid; gap: 8px; margin: 18px 0 0; padding: 0 4px; }
+  .vr-invoice-tax-breakdown div { display: flex; justify-content: space-between; gap: 12px; color: #24231f; font-size: 12px; }
+  .vr-invoice-tax-breakdown dt { color: #24231f; }
+  .vr-invoice-tax-breakdown dd { margin: 0; color: #24231f; font-weight: 600; }
   .vr-invoice-total { display: flex; justify-content: space-between; gap: 12px; margin-top: 18px; border-radius: 12px; background: #f5f3ed; padding: 17px; font-weight: 700; }
   .vr-invoice-total strong { color: #984b20; font-size: 22px; }
   .vr-invoice-thanks { margin: 22px 0 0; color: #6e6a62; font: italic 16px Georgia, serif; text-align: center; }
@@ -89,9 +98,28 @@ function isInvoiceOrder(value: unknown): value is InvoiceOrder {
     typeof value.createdAt === "string" &&
     Number.isFinite(Date.parse(value.createdAt)) &&
     typeof value.customerName === "string" &&
+    typeof value.subtotal === "number" &&
+    Number.isFinite(value.subtotal) &&
+    value.subtotal >= 0 &&
+    typeof value.discountAmount === "number" &&
+    Number.isFinite(value.discountAmount) &&
+    value.discountAmount >= 0 &&
+    (value.couponCode === null ||
+      (typeof value.couponCode === "string" &&
+        value.couponCode.length > 0 &&
+        value.couponCode.length <= 32)) &&
+    typeof value.taxRatePercent === "number" &&
+    Number.isFinite(value.taxRatePercent) &&
+    value.taxRatePercent >= 0 &&
+    value.taxRatePercent <= 100 &&
+    typeof value.taxAmount === "number" &&
+    Number.isFinite(value.taxAmount) &&
+    value.taxAmount >= 0 &&
     typeof value.total === "number" &&
     Number.isFinite(value.total) &&
     value.total >= 0 &&
+    Math.round((value.subtotal - value.discountAmount + value.taxAmount) * 100) ===
+      Math.round(value.total * 100) &&
     typeof value.tableNumber === "number" &&
     Number.isSafeInteger(value.tableNumber) &&
     Array.isArray(value.items) &&
@@ -291,8 +319,24 @@ export default function InvoiceClient({
                   ))}
                 </tbody>
               </table>
+              <dl className="vr-invoice-tax-breakdown">
+                <div>
+                  <dt>Subtotal</dt>
+                  <dd>{formatINR.format(order.subtotal)}</dd>
+                </div>
+                {order.couponCode && (
+                  <div>
+                    <dt>Coupon ({order.couponCode})</dt>
+                    <dd>-{formatINR.format(order.discountAmount)}</dd>
+                  </div>
+                )}
+                <div>
+                  <dt>GST / Tax ({order.taxRatePercent}%)</dt>
+                  <dd>{formatINR.format(order.taxAmount)}</dd>
+                </div>
+              </dl>
               <div className="vr-invoice-total">
-                <span>Order Total</span>
+                <span>Grand Total</span>
                 <strong>{formatINR.format(order.total)}</strong>
               </div>
               <p className="vr-invoice-thanks">

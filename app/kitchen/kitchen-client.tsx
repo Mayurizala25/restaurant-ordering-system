@@ -16,6 +16,8 @@ type OrderItemRecord = {
   id: string;
   item_name: string;
   quantity: number;
+  spice_level: "Mild" | "Medium" | "Spicy";
+  special_instructions: string;
   menu_item: { image_url: string } | { image_url: string }[] | null;
 };
 
@@ -46,7 +48,11 @@ function isOrderItemRecord(value: unknown): value is OrderItemRecord {
     typeof value.item_name === "string" &&
     typeof value.quantity === "number" &&
     Number.isSafeInteger(value.quantity) &&
-    value.quantity > 0
+    value.quantity > 0 &&
+    (value.spice_level === "Mild" ||
+      value.spice_level === "Medium" ||
+      value.spice_level === "Spicy") &&
+    typeof value.special_instructions === "string"
   ) {
     const menuItem = value.menu_item;
     return (
@@ -174,6 +180,8 @@ function kitchenOrder(order: OrderRecord): KitchenOrder {
       id: item.id,
       quantity: item.quantity,
       name: item.item_name,
+      spiceLevel: item.spice_level,
+      specialInstructions: item.special_instructions,
       imageUrl: validImageUrl(
         (Array.isArray(item.menu_item)
           ? item.menu_item[0]
@@ -215,6 +223,7 @@ export default function KitchenClient() {
 
     try {
       const response = await fetch("/api/orders", {
+        credentials: "include",
         cache: "no-store",
         signal: controller.signal,
       });

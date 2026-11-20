@@ -22,6 +22,8 @@ type OrderItem = {
   id: string;
   item_name: string;
   quantity: number;
+  spice_level: "Mild" | "Medium" | "Spicy";
+  special_instructions: string;
   unit_price_inr: number | string;
   line_total_inr: number | string;
   menu_item:
@@ -80,6 +82,10 @@ function isOrderItem(value: unknown): value is OrderItem {
     typeof value.quantity === "number" &&
     Number.isSafeInteger(value.quantity) &&
     value.quantity > 0 &&
+    (value.spice_level === "Mild" ||
+      value.spice_level === "Medium" ||
+      value.spice_level === "Spicy") &&
+    typeof value.special_instructions === "string" &&
     (typeof value.unit_price_inr === "number" ||
       typeof value.unit_price_inr === "string") &&
     Number.isFinite(Number(value.unit_price_inr)) &&
@@ -192,6 +198,8 @@ function kitchenOrder(order: HistoryOrder): KitchenOrder {
         id: item.id,
         quantity: item.quantity,
         name: item.item_name,
+        spiceLevel: item.spice_level,
+        specialInstructions: item.special_instructions,
         imageUrl: validImageUrl(menuItem?.image_url ?? ""),
       };
     }),
