@@ -12,14 +12,75 @@ import {
 } from "../../../../lib/admin-session";
 
 const MAX_BODY_BYTES = 16_384;
-const cookieOptions = {
-  httpOnly: true,
-  maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
-  path: "/",
-  sameSite: "strict" as const,
-  secure: process.env.NODE_ENV === "production",
-};
 const noStoreHeaders = { "Cache-Control": "no-store" };
+
+function isPrivateIPv4(hostname: string): boolean {
+  const octets = hostname.split(".").map(Number);
+  if (
+    octets.length !== 4 ||
+    octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)
+  ) {
+    return false;
+  }
+
+  const [first, second] = octets;
+  return (
+    first === 10 ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168)
+  );
+}
+
+function isLocalDevelopmentHost(hostname: string): boolean {
+  return (
+    ["localhost", "127.0.0.1", "[::1]"].includes(hostname) ||
+    isPrivateIPv4(hostname)
+  );
+}
+
+function isSameOriginLocalHttpRequest(
+  origin: string | null,
+  requestHost: string | null,
+): boolean {
+  if (!origin || !requestHost) return false;
+
+  try {
+    const originUrl = new URL(origin);
+    return (
+      originUrl.protocol === "http:" &&
+      originUrl.host.toLowerCase() === requestHost.toLowerCase() &&
+      isLocalDevelopmentHost(originUrl.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function getCookieOptions(request: Request) {
+  const requestUrl = new URL(request.url);
+  const forwardedProtocol = request.headers
+    .get("x-forwarded-proto")
+    ?.split(",", 1)[0]
+    .trim()
+    .toLowerCase();
+  const secure = !isSameOriginLocalHttpRequest(
+    request.headers.get("origin"),
+    request.headers.get("host"),
+  ) && (
+    requestUrl.protocol === "https:" ||
+    forwardedProtocol === "https" ||
+    (process.env.NODE_ENV === "production" &&
+      !isLocalDevelopmentHost(requestUrl.hostname))
+  );
+
+  return {
+    httpOnly: true,
+    maxAge: ADMIN_SESSION_MAX_AGE_SECONDS,
+    path: "/",
+    sameSite: "strict" as const,
+    secure,
+  };
+}
 
 function getClientIp(request: Request): string | null {
   // These headers must be populated or overwritten by the trusted hosting proxy.
@@ -183,7 +244,7 @@ export async function POST(request: Request) {
   cookieStore.set(
     ADMIN_SESSION_COOKIE,
     createAdminSessionToken(),
-    cookieOptions,
+    getCookieOptions(request),
   );
   return Response.json(
     { authenticated: true },
@@ -191,7 +252,7 @@ export async function POST(request: Request) {
   );
 }
 
-export async function DELETE() {
+export async function DELETE(request: Request) {
   const cookieStore = await cookies();
   const token = cookieStore.get(ADMIN_SESSION_COOKIE)?.value;
   if (!(await revokeAdminSessionToken(token))) {
@@ -201,7 +262,7 @@ export async function DELETE() {
     );
   }
   cookieStore.set(ADMIN_SESSION_COOKIE, "", {
-    ...cookieOptions,
+    ...getCookieOptions(request),
     maxAge: 0,
   });
   return new Response(null, { status: 204, headers: noStoreHeaders });
